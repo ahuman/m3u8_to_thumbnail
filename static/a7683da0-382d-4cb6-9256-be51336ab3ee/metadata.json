@@ -1,0 +1,184 @@
+{
+  "video_name": "test8",
+  "total_duration": 2725.006444,
+  "total_segments": 275,
+  "total_original_size": 89032852,
+  "total_traffic": 13238272,
+  "elapsed_time": 66.86557102203369,
+  "frames": [
+    {
+      "index": 0,
+      "time": 0,
+      "duration": 10.046444,
+      "image": "frame_0000.jpg"
+    },
+    {
+      "index": 1,
+      "time": 10.046444,
+      "duration": 11.96,
+      "image": "frame_0001.jpg"
+    },
+    {
+      "index": 2,
+      "time": 22.006444000000002,
+      "duration": 9.52,
+      "image": "frame_0002.jpg"
+    },
+    {
+      "index": 3,
+      "time": 31.526443999999998,
+      "duration": 8.72,
+      "image": "frame_0003.jpg"
+    },
+    {
+      "index": 4,
+      "time": 40.246444,
+      "duration": 12.12,
+      "image": "frame_0004.jpg"
+    },
+    {
+      "index": 5,
+      "time": 52.366444,
+      "duration": 10.0,
+      "image": "frame_0005.jpg"
+    },
+    {
+      "index": 6,
+      "time": 62.366444,
+      "duration": 10.0,
+      "image": "frame_0006.jpg"
+    },
+    {
+      "index": 7,
+      "time": 72.366444,
+      "duration": 10.0,
+      "image": "frame_0007.jpg"
+    },
+    {
+      "index": 8,
+      "time": 82.366444,
+      "duration": 10.0,
+      "image": "frame_0008.jpg"
+    },
+    {
+      "index": 9,
+      "time": 92.366444,
+      "duration": 7.44,
+      "image": "frame_0009.jpg"
+    },
+    {
+      "index": 10,
+      "time": 99.806444,
+      "duration": 11.64,
+      "image": "frame_0010.jpg"
+    },
+    {
+      "index": 11,
+      "time": 111.446444,
+      "duration": 7.44,
+      "image": "frame_0011.jpg"
+    },
+    {
+      "index": 12,
+      "time": 118.886444,
+      "duration": 13.36,
+      "image": "frame_0012.jpg"
+    },
+    {
+      "index": 13,
+      "time": 132.246444,
+      "duration": 7.88,
+      "image": "frame_0013.jpg"
+    },
+    {
+      "index": 14,
+      "time": 140.126444,
+      "duration": 13.6,
+      "image": "frame_0014.jpg"
+    },
+    {
+      "index": 15,
+      "time": 153.726444,
+      "duration": 8.96,
+      "image": "frame_0015.jpg"
+    },
+    {
+      "index": 16,
+      "time": 162.686444,
+      "duration": 6.6,
+      "image": "frame_0016.jpg"
+    },
+    {
+      "index": 17,
+      "time": 169.286444,
+      "duration": 13.96,
+      "image": "frame_0017.jpg"
+    },
+    {
+      "index": 18,
+      "time": 183.246444,
+      "duration": 6.28,
+      "image": "frame_0018.jpg"
+    },
+    {
+      "index": 19,
+      "time": 189.526444,
+      "duration": 12.24,
+      "image": "frame_0019.jpg"
+    },
+    {
+      "index": 20,
+      "time": 201.766444,
+      "duration": 10.2,
+      "image": "frame_0020.jpg"
+    },
+    {
+      "index": 21,
+      "time": 211.966444,
+      "duration": 7.28,
+      "image": "frame_0021.jpg"
+    },
+    {
+      "index": 22,
+      "time": 219.246444,
+      "duration": 10.0,
+      "image": "frame_0022.jpg"
+    },
+    {
+      "index": 23,
+      "time": 229.246444,
+      "duration": 8.88,
+      "image": "frame_0023.jpg"
+    },
+    {
+      "index": 24,
+      "time": 238.126444,
+      "duration": 10.12,
+      "image": "frame_0024.jpg"
+    },
+    {
+      "index": 25,
+      "time": 248.246444,
+      "duration": 12.84,
+      "image": "frame_0025.jpg"
+    },
+    {
+      "index": 26,
+      "time": 261.08644400000003,
+      "duration": 6.96,
+      "image": "frame_0026.jpg"
+    },
+    {
+      "index": 27,
+      "time": 268.046444,
+      "duration": 11.28,
+      "image": "frame_0027.jpg"
+    },
+    {
+      "index": 28,
+      "time": 279.326444,
+      "duration": 12.48,
+      "image": "frame_0028.jpg"
+    }
+  ]
+}

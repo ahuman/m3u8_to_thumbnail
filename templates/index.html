@@ -128,6 +128,20 @@
             cursor: not-allowed;
         }
 
+        .btn-local {
+            background: linear-gradient(135deg, #20bf55 0%, #01baef 100%);
+        }
+        .btn-local:hover:not(:disabled) {
+            box-shadow: 0 10px 30px rgba(1, 186, 239, 0.3);
+        }
+
+        .divider {
+            border: 0;
+            height: 1px;
+            background: rgba(255, 255, 255, 0.1);
+            margin: 30px 0;
+        }
+
         .progress-section {
             background: rgba(255, 255, 255, 0.05);
             border-radius: 16px;
@@ -219,6 +233,15 @@
         .video-info {
             color: #8892b0;
             font-size: 0.9em;
+            text-align: right;
+        }
+        
+        .save-path {
+            color: #00d4ff; 
+            font-family: 'Courier New', Courier, monospace; 
+            font-size: 0.85em;
+            margin-top: 5px;
+            user-select: all; 
         }
 
         /* ========== 主视频预览区（大图） ========== */
@@ -501,10 +524,11 @@
     <div class="container">
         <div class="header">
             <h1>M3U8 视频切片首帧预览工具</h1>
-            <p>输入m3u8链接，自动提取每个ts切片的首帧图片，支持时间轴预览</p>
+            <p>输入m3u8链接在线提取，或加载本地已下载的数据包</p>
         </div>
 
         <div class="input-section">
+            <!-- 下载任务区域 -->
             <div class="input-group">
                 <label for="m3u8_url">M3U8 视频地址</label>
                 <input type="text" id="m3u8_url" placeholder="https://example.com/video.m3u8">
@@ -524,6 +548,17 @@
             <button class="btn-download" id="btn_download" onclick="startDownload()">
                 开始下载并提取首帧
             </button>
+            
+            <hr class="divider">
+            
+            <!-- 本地加载区域 -->
+            <div class="input-group">
+                <label for="local_folder">加载本地已下载的记录（断网可用）</label>
+                <input type="text" id="local_folder" placeholder="输入之前生成的文件夹绝对路径，例如：C:\m3u8_viewer\static\xxx">
+            </div>
+            <button class="btn-download btn-local" id="btn_load_local" onclick="loadLocalFolder()">
+                直接加载本地数据文件夹
+            </button>
         </div>
 
         <div class="progress-section" id="progress_section">
@@ -532,6 +567,8 @@
                     <span id="progress_status" class="loading-text">准备中...</span>
                     <!-- 大小与流量信息占位 -->
                     <span id="progress_sizes_info" style="color: #8892b0; font-size: 0.9em; margin-left: 15px; font-family: 'Courier New', monospace;"></span>
+                    <!-- 新增耗时信息展示占位 -->
+                    <span id="progress_time_info" style="color: #20bf55; font-size: 0.9em; margin-left: 15px; font-family: 'Courier New', monospace;"></span>
                     <button class="btn-cancel" id="btn_cancel" onclick="cancelDownload()">终止</button>
                 </div>
                 <span id="progress_percent">0%</span>
@@ -544,7 +581,11 @@
         <div class="viewer-section" id="viewer_section">
             <div class="viewer-header">
                 <h2 id="viewer_title">视频预览</h2>
-                <span class="video-info" id="video_info"></span>
+                <div>
+                    <div class="video-info" id="video_info"></div>
+                    <!-- 展示本地工作目录的路径 -->
+                    <div class="save-path" id="save_path_info"></div>
+                </div>
             </div>
 
             <!-- 主视频预览区（大图） -->
@@ -586,7 +627,7 @@
                 <line x1="17" y1="17" x2="22" y2="17"></line>
                 <line x1="17" y1="7" x2="22" y2="7"></line>
             </svg>
-            <p>输入m3u8链接并点击下载，开始提取视频首帧</p>
+            <p>输入m3u8链接并点击下载，或填入本地路径复原历史记录</p>
         </div>
     </div>
 
@@ -647,11 +688,13 @@
             const btn = document.getElementById('btn_download');
             btn.disabled = true;
             btn.textContent = '处理中...';
+            document.getElementById('btn_load_local').disabled = true;
 
             document.getElementById('empty_state').style.display = 'none';
             document.getElementById('viewer_section').classList.remove('active');
             document.getElementById('progress_section').classList.add('active');
             document.getElementById('progress_sizes_info').textContent = '';
+            document.getElementById('progress_time_info').textContent = '';
 
             try {
                 const response = await fetch('/api/start', {
@@ -666,6 +709,49 @@
                     startStatusPolling();
                 } else {
                     showToast(data.error || '启动失败', 'error');
+                    resetUI();
+                }
+            } catch (error) {
+                showToast('网络错误: ' + error.message, 'error');
+                resetUI();
+            }
+        }
+
+        // ========== 新增：加载本地文件逻辑 ==========
+        async function loadLocalFolder() {
+            const folderPath = document.getElementById('local_folder').value.trim();
+            if (!folderPath) {
+                showToast('请输入本地文件夹路径', 'error');
+                return;
+            }
+
+            const btnLoad = document.getElementById('btn_load_local');
+            btnLoad.disabled = true;
+            btnLoad.textContent = '加载中...';
+            document.getElementById('btn_download').disabled = true;
+
+            document.getElementById('empty_state').style.display = 'none';
+            document.getElementById('viewer_section').classList.remove('active');
+
+            try {
+                const response = await fetch('/api/load_local', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ folder_path: folderPath })
+                });
+                const data = await response.json();
+
+                if (data.success) {
+                    currentTaskId = data.task_id;
+                    taskData = data.task_data;
+                    
+                    document.getElementById('video_name').value = taskData.video_name; 
+                    showToast('本地数据挂载成功！');
+                    showViewer(taskData);
+                    
+                    resetButtonStates();
+                } else {
+                    showToast(data.error || '加载失败', 'error');
                     resetUI();
                 }
             } catch (error) {
@@ -733,6 +819,7 @@
             const progressStatus = document.getElementById('progress_status');
             const progressPercent = document.getElementById('progress_percent');
             const sizesInfo = document.getElementById('progress_sizes_info');
+            const timeInfo = document.getElementById('progress_time_info');
 
             let percent = 0;
             if (data.total_segments > 0) {
@@ -747,7 +834,7 @@
                 'parsing': '解析m3u8...',
                 'downloading': `下载切片中... (${data.current}/${data.total_segments})`,
                 'completed': '处理完成',
-                'stopped': '已终止',
+                'stopped': '已保存并终止',
                 'error': '处理出错',
                 'cancelled': '已取消'
             };
@@ -758,6 +845,13 @@
                 sizesInfo.textContent = `TS总大小: ${formatBytes(data.total_original_size)} | 消耗流量: ${formatBytes(data.total_traffic)}`;
             } else {
                 sizesInfo.textContent = '';
+            }
+
+            // 实时展示耗时
+            if (data.elapsed_time !== undefined) {
+                timeInfo.textContent = `已耗时: ${formatTime(data.elapsed_time)}`;
+            } else {
+                timeInfo.textContent = '';
             }
         }
 
@@ -791,12 +885,20 @@
             document.getElementById('progress_section').classList.remove('active');
             document.getElementById('viewer_section').classList.add('active');
 
-            const videoName = document.getElementById('video_name').value.trim() || '未命名视频';
+            const videoName = data.video_name || document.getElementById('video_name').value.trim() || '未命名视频';
             document.getElementById('viewer_title').textContent = videoName;
             
-            // 最终数据显示在视频详情头里
+            // 最终数据显示在视频详情头里，包含总耗时
+            const elapsedStr = data.elapsed_time ? ` | 总耗时 ${formatTime(data.elapsed_time)}` : '';
             document.getElementById('video_info').textContent =
-                `共 ${data.total_segments} 个切片 | 时长 ${formatTime(data.total_duration)} | 提取 ${data.frames.length} 帧 | TS原总大小 ${formatBytes(data.total_original_size)} | 总耗流 ${formatBytes(data.total_traffic)}`;
+                `共 ${data.total_segments} 个切片 | 时长 ${formatTime(data.total_duration)} | 提取 ${data.frames.length} 帧 | TS原总大小 ${formatBytes(data.total_original_size)} | 总耗流 ${formatBytes(data.total_traffic)}${elapsedStr}`;
+            
+            // 展示当前数据存储路径，方便用户拷贝后续直接加载
+            if (data.work_dir) {
+                document.getElementById('save_path_info').textContent = `数据保存路径: ${data.work_dir}`;
+            } else {
+                document.getElementById('save_path_info').textContent = '';
+            }
             
             document.getElementById('timeline_duration').textContent = formatTimeFull(data.total_duration);
 
@@ -824,6 +926,7 @@
 
             // 构建时间轴
             buildTimeline(data);
+            resetButtonStates();
         }
 
         function buildTimeline(data) {
@@ -885,11 +988,19 @@
                 progress.style.width = '0%';
             });
         }
+        
+        function resetButtonStates() {
+            const btnDown = document.getElementById('btn_download');
+            btnDown.disabled = false;
+            btnDown.textContent = '开始下载并提取首帧';
+            
+            const btnLoad = document.getElementById('btn_load_local');
+            btnLoad.disabled = false;
+            btnLoad.textContent = '直接加载本地数据文件夹';
+        }
 
         function resetUI() {
-            const btn = document.getElementById('btn_download');
-            btn.disabled = false;
-            btn.textContent = '开始下载并提取首帧';
+            resetButtonStates();
             document.getElementById('progress_section').classList.remove('active');
             document.getElementById('empty_state').style.display = 'block';
             currentTaskId = null;
