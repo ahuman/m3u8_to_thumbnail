@@ -1,0 +1,896 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>M3U8 视频切片首帧预览工具</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            min-height: 100vh;
+            color: #e0e0e0;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        .header {
+            text-align: center;
+            padding: 30px 0;
+        }
+
+        .header h1 {
+            font-size: 2.2em;
+            color: #00d4ff;
+            text-shadow: 0 0 20px rgba(0, 212, 255, 0.3);
+            margin-bottom: 10px;
+        }
+
+        .header p {
+            color: #8892b0;
+            font-size: 1.1em;
+        }
+
+        .input-section {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 16px;
+            padding: 30px;
+            margin-bottom: 30px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+        }
+
+        .input-group {
+            margin-bottom: 20px;
+        }
+
+        .input-group label {
+            display: block;
+            margin-bottom: 8px;
+            color: #ccd6f6;
+            font-weight: 500;
+            font-size: 0.95em;
+        }
+
+        .input-group input {
+            width: 100%;
+            padding: 14px 18px;
+            border: 2px solid rgba(255, 255, 255, 0.1);
+            border-radius: 10px;
+            background: rgba(0, 0, 0, 0.2);
+            color: #e0e0e0;
+            font-size: 1em;
+            transition: all 0.3s ease;
+        }
+
+        .input-group input:focus {
+            outline: none;
+            border-color: #00d4ff;
+            box-shadow: 0 0 15px rgba(0, 212, 255, 0.2);
+        }
+
+        .input-group textarea {
+            width: 100%;
+            padding: 14px 18px;
+            border: 2px solid rgba(255, 255, 255, 0.1);
+            border-radius: 10px;
+            background: rgba(0, 0, 0, 0.2);
+            color: #e0e0e0;
+            font-size: 0.9em;
+            transition: all 0.3s ease;
+            resize: vertical;
+            min-height: 80px;
+            font-family: 'Courier New', monospace;
+        }
+
+        .input-group textarea:focus {
+            outline: none;
+            border-color: #00d4ff;
+            box-shadow: 0 0 15px rgba(0, 212, 255, 0.2);
+        }
+
+        .input-group textarea::placeholder {
+            color: #5a6a8a;
+        }
+
+        .btn-download {
+            width: 100%;
+            padding: 16px;
+            border: none;
+            border-radius: 10px;
+            background: linear-gradient(135deg, #00d4ff 0%, #0099cc 100%);
+            color: white;
+            font-size: 1.1em;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .btn-download:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 30px rgba(0, 212, 255, 0.3);
+        }
+
+        .btn-download:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .progress-section {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 16px;
+            padding: 25px;
+            margin-bottom: 30px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            display: none;
+        }
+
+        .progress-section.active {
+            display: block;
+        }
+
+        .progress-info {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+            color: #ccd6f6;
+        }
+
+        .progress-left {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .btn-cancel {
+            padding: 6px 16px;
+            border: 1px solid #ff4757;
+            border-radius: 6px;
+            background: rgba(255, 71, 87, 0.15);
+            color: #ff4757;
+            font-size: 0.85em;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .btn-cancel:hover {
+            background: rgba(255, 71, 87, 0.3);
+        }
+
+        .btn-cancel:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .progress-bar-container {
+            width: 100%;
+            height: 10px;
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 5px;
+            overflow: hidden;
+        }
+
+        .progress-bar {
+            height: 100%;
+            background: linear-gradient(90deg, #00d4ff, #0099cc);
+            border-radius: 5px;
+            transition: width 0.3s ease;
+            width: 0%;
+        }
+
+        .viewer-section {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 16px;
+            padding: 30px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            display: none;
+        }
+
+        .viewer-section.active {
+            display: block;
+        }
+
+        .viewer-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+
+        .viewer-header h2 {
+            color: #ccd6f6;
+            font-size: 1.3em;
+        }
+
+        .video-info {
+            color: #8892b0;
+            font-size: 0.9em;
+        }
+
+        /* ========== 主视频预览区（大图） ========== */
+        .video-preview {
+            width: 100%;
+            aspect-ratio: 16 / 9;
+            background: #000;
+            border-radius: 12px;
+            overflow: hidden;
+            position: relative;
+            border: 2px solid rgba(255, 255, 255, 0.1);
+            margin-bottom: 20px;
+        }
+
+        .video-preview img {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            display: block;
+            transition: opacity 0.15s ease;
+        }
+
+        .video-preview .preview-time {
+            position: absolute;
+            top: 16px;
+            left: 16px;
+            background: rgba(0, 0, 0, 0.7);
+            color: #00d4ff;
+            padding: 6px 14px;
+            border-radius: 20px;
+            font-size: 1em;
+            font-weight: 600;
+            font-family: 'Courier New', monospace;
+            backdrop-filter: blur(4px);
+            border: 1px solid rgba(0, 212, 255, 0.3);
+        }
+
+        .video-preview .preview-frame-info {
+            position: absolute;
+            top: 16px;
+            right: 16px;
+            background: rgba(0, 0, 0, 0.7);
+            color: #ccd6f6;
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 0.8em;
+            backdrop-filter: blur(4px);
+        }
+
+        /* ========== 时间轴 ========== */
+        .timeline-container {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            padding: 30px 20px 15px 20px;
+            background: linear-gradient(transparent, rgba(0, 0, 0, 0.75));
+            z-index: 10;
+        }
+
+        .timeline-label {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 8px;
+            color: #e0e0e0;
+            font-size: 0.85em;
+            text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.9);
+        }
+
+        .timeline-wrapper {
+            position: relative;
+            height: 35px;
+            background: rgba(0, 0, 0, 0.15);
+            border-radius: 8px;
+            overflow: hidden;
+            cursor: crosshair;
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            backdrop-filter: blur(2px);
+        }
+
+        .timeline-track {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+        }
+
+        .timeline-progress {
+            position: absolute;
+            top: 0;
+            left: 0;
+            height: 100%;
+            background: linear-gradient(90deg, rgba(0, 212, 255, 0.2), rgba(0, 153, 204, 0.25));
+            width: 0%;
+            pointer-events: none;
+        }
+
+        .timeline-cursor {
+            position: absolute;
+            top: 0;
+            width: 2px;
+            height: 100%;
+            background: #00d4ff;
+            box-shadow: 0 0 10px rgba(0, 212, 255, 0.8);
+            pointer-events: none;
+            display: none;
+            z-index: 10;
+        }
+
+        .timeline-cursor::before {
+            content: '';
+            position: absolute;
+            top: -5px;
+            left: -4px;
+            width: 10px;
+            height: 10px;
+            background: #00d4ff;
+            border-radius: 50%;
+            box-shadow: 0 0 10px rgba(0, 212, 255, 0.8);
+        }
+
+        .timeline-cursor::after {
+            content: attr(data-time);
+            position: absolute;
+            top: -30px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0, 0, 0, 0.8);
+            color: #00d4ff;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 0.85em;
+            font-family: 'Courier New', monospace;
+            white-space: nowrap;
+            border: 1px solid rgba(0, 212, 255, 0.3);
+            pointer-events: none;
+        }
+
+        .timeline-segments {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+        }
+
+        .timeline-segment {
+            height: 100%;
+            border-right: 1px solid rgba(255, 255, 255, 0.05);
+            position: absolute;
+        }
+
+        .timeline-segment.loaded {
+            background: rgba(0, 212, 255, 0.1);
+        }
+
+        /* ========== 缩略图网格（移到底部） ========== */
+        .frames-section-title {
+            color: #ccd6f6;
+            font-size: 1em;
+            margin: 20px 0 12px 0;
+            padding-top: 15px;
+            border-top: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .frames-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+            gap: 12px;
+            max-height: 300px;
+            overflow-y: auto;
+            padding-right: 8px;
+        }
+
+        .frames-grid::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        .frames-grid::-webkit-scrollbar-track {
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 3px;
+        }
+
+        .frames-grid::-webkit-scrollbar-thumb {
+            background: #00d4ff;
+            border-radius: 3px;
+        }
+
+        .frame-item {
+            position: relative;
+            border-radius: 8px;
+            overflow: hidden;
+            background: rgba(0, 0, 0, 0.3);
+            border: 2px solid transparent;
+            transition: all 0.2s ease;
+            cursor: pointer;
+        }
+
+        .frame-item:hover {
+            transform: scale(1.05);
+            border-color: #00d4ff;
+        }
+
+        .frame-item.active {
+            border-color: #00d4ff;
+            box-shadow: 0 0 15px rgba(0, 212, 255, 0.3);
+        }
+
+        .frame-item img {
+            width: 100%;
+            height: 90px;
+            object-fit: cover;
+            display: block;
+        }
+
+        .frame-time {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: linear-gradient(transparent, rgba(0, 0, 0, 0.85));
+            padding: 6px;
+            color: white;
+            font-size: 0.75em;
+            text-align: center;
+            font-family: 'Courier New', monospace;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: #5a6a8a;
+        }
+
+        .empty-state svg {
+            width: 80px;
+            height: 80px;
+            margin-bottom: 20px;
+            opacity: 0.5;
+        }
+
+        .toast {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 16px 24px;
+            border-radius: 10px;
+            color: white;
+            font-weight: 500;
+            z-index: 1000;
+            transform: translateX(150%);
+            transition: transform 0.3s ease;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+        }
+
+        .toast.show {
+            transform: translateX(0);
+        }
+
+        .toast.success {
+            background: linear-gradient(135deg, #00d4ff, #0099cc);
+        }
+
+        .toast.error {
+            background: linear-gradient(135deg, #ff4757, #cc0033);
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .loading-text {
+            animation: pulse 1.5s infinite;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>M3U8 视频切片首帧预览工具</h1>
+            <p>输入m3u8链接，自动提取每个ts切片的首帧图片，支持时间轴预览</p>
+        </div>
+
+        <div class="input-section">
+            <div class="input-group">
+                <label for="m3u8_url">M3U8 视频地址</label>
+                <input type="text" id="m3u8_url" placeholder="https://example.com/video.m3u8">
+            </div>
+            <div class="input-group">
+                <label for="video_name">视频名称（可选）</label>
+                <input type="text" id="video_name" placeholder="输入视频名称">
+            </div>
+            <div class="input-group">
+                <label for="cookie">Cookie（可选，部分视频网站需要）</label>
+                <textarea id="cookie" placeholder="在此粘贴Cookie，例如：uuid=xxx; session=yyy; ..."></textarea>
+            </div>
+            <button class="btn-download" id="btn_download" onclick="startDownload()">
+                开始下载并提取首帧
+            </button>
+        </div>
+
+        <div class="progress-section" id="progress_section">
+            <div class="progress-info">
+                <div class="progress-left">
+                    <span id="progress_status" class="loading-text">准备中...</span>
+                    <!-- 大小与流量信息占位 -->
+                    <span id="progress_sizes_info" style="color: #8892b0; font-size: 0.9em; margin-left: 15px; font-family: 'Courier New', monospace;"></span>
+                    <button class="btn-cancel" id="btn_cancel" onclick="cancelDownload()">终止</button>
+                </div>
+                <span id="progress_percent">0%</span>
+            </div>
+            <div class="progress-bar-container">
+                <div class="progress-bar" id="progress_bar"></div>
+            </div>
+        </div>
+
+        <div class="viewer-section" id="viewer_section">
+            <div class="viewer-header">
+                <h2 id="viewer_title">视频预览</h2>
+                <span class="video-info" id="video_info"></span>
+            </div>
+
+            <!-- 主视频预览区（大图） -->
+            <div class="video-preview" id="video_preview">
+                <img id="preview_img" src="" alt="视频预览">
+                <div class="preview-time" id="preview_time">00:00:00</div>
+                <div class="preview-frame-info" id="preview_frame_info">帧 1 / 1</div>
+
+                <!-- 时间轴移入 -->
+                <div class="timeline-container">
+                    <div class="timeline-label">
+                        <span>00:00:00</span>
+                        <span id="timeline_duration">00:00:00</span>
+                    </div>
+                    <div class="timeline-wrapper" id="timeline_wrapper">
+                        <div class="timeline-track" id="timeline_track"></div>
+                        <div class="timeline-segments" id="timeline_segments"></div>
+                        <div class="timeline-progress" id="timeline_progress"></div>
+                        <div class="timeline-cursor" id="timeline_cursor"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 缩略图网格（底部） -->
+            <div class="frames-section-title">所有首帧缩略图</div>
+            <div class="frames-grid" id="frames_grid">
+                <!-- 帧图片将在这里显示 -->
+            </div>
+        </div>
+
+        <div class="empty-state" id="empty_state">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18"></rect>
+                <line x1="7" y1="2" x2="7" y2="22"></line>
+                <line x1="17" y1="2" x2="17" y2="22"></line>
+                <line x1="2" y1="12" x2="22" y2="12"></line>
+                <line x1="2" y1="7" x2="7" y2="7"></line>
+                <line x1="2" y1="17" x2="7" y2="17"></line>
+                <line x1="17" y1="17" x2="22" y2="17"></line>
+                <line x1="17" y1="7" x2="22" y2="7"></line>
+            </svg>
+            <p>输入m3u8链接并点击下载，开始提取视频首帧</p>
+        </div>
+    </div>
+
+    <div class="toast" id="toast"></div>
+
+    <script>
+        let currentTaskId = null;
+        let statusInterval = null;
+        let taskData = null;
+        let currentFrameIndex = 0;
+
+        function showToast(message, type = 'success') {
+            const toast = document.getElementById('toast');
+            toast.textContent = message;
+            toast.className = `toast ${type} show`;
+            setTimeout(() => {
+                toast.classList.remove('show');
+            }, 3000);
+        }
+
+        function formatTime(seconds) {
+            const h = Math.floor(seconds / 3600);
+            const m = Math.floor((seconds % 3600) / 60);
+            const s = Math.floor(seconds % 60);
+            if (h > 0) {
+                return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+            }
+            return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+        }
+
+        function formatTimeFull(seconds) {
+            const h = Math.floor(seconds / 3600);
+            const m = Math.floor((seconds % 3600) / 60);
+            const s = Math.floor(seconds % 60);
+            return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+        }
+
+        // 格式化字节大小为 KB/MB/GB
+        function formatBytes(bytes) {
+            if (!bytes || bytes === 0) return '0 B';
+            const k = 1024;
+            const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+        }
+
+        async function startDownload() {
+            const m3u8Url = document.getElementById('m3u8_url').value.trim();
+            const videoName = document.getElementById('video_name').value.trim();
+            const cookie = document.getElementById('cookie').value.trim();
+
+            if (!m3u8Url) {
+                showToast('请输入m3u8视频地址', 'error');
+                return;
+            }
+
+            const btn = document.getElementById('btn_download');
+            btn.disabled = true;
+            btn.textContent = '处理中...';
+
+            document.getElementById('empty_state').style.display = 'none';
+            document.getElementById('viewer_section').classList.remove('active');
+            document.getElementById('progress_section').classList.add('active');
+            document.getElementById('progress_sizes_info').textContent = '';
+
+            try {
+                const response = await fetch('/api/start', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ m3u8_url: m3u8Url, video_name: videoName, cookie: cookie })
+                });
+                const data = await response.json();
+
+                if (data.success) {
+                    currentTaskId = data.task_id;
+                    startStatusPolling();
+                } else {
+                    showToast(data.error || '启动失败', 'error');
+                    resetUI();
+                }
+            } catch (error) {
+                showToast('网络错误: ' + error.message, 'error');
+                resetUI();
+            }
+        }
+
+        async function cancelDownload() {
+            if (!currentTaskId) return;
+
+            const btn = document.getElementById('btn_cancel');
+            btn.disabled = true;
+            btn.textContent = '终止中...';
+
+            try {
+                await fetch(`/api/cancel/${currentTaskId}`, { method: 'POST' });
+                showToast('已发送终止请求');
+            } catch (error) {
+                showToast('终止失败: ' + error.message, 'error');
+                btn.disabled = false;
+                btn.textContent = '终止';
+            }
+        }
+
+        function startStatusPolling() {
+            if (statusInterval) clearInterval(statusInterval);
+
+            statusInterval = setInterval(async () => {
+                if (!currentTaskId) return;
+
+                try {
+                    const response = await fetch(`/api/status/${currentTaskId}`);
+                    const data = await response.json();
+
+                    if (data.success) {
+                        updateProgress(data);
+                        taskData = data;
+
+                        if (data.status === 'completed' || data.status === 'error' || data.status === 'cancelled' || data.status === 'stopped') {
+                            clearInterval(statusInterval);
+                            if (data.status === 'completed') {
+                                showToast('处理完成！');
+                                showViewer(data);
+                            } else if (data.status === 'stopped') {
+                                showToast(`已终止，成功提取 ${data.frames.length} 帧`);
+                                showViewer(data);
+                            } else if (data.status === 'error') {
+                                showToast('错误: ' + data.error, 'error');
+                                resetUI();
+                            } else if (data.status === 'cancelled') {
+                                showToast('已取消', 'error');
+                                resetUI();
+                            }
+                        }
+                    }
+                } catch (error) {
+                    console.error('Polling error:', error);
+                }
+            }, 1000);
+        }
+
+        function updateProgress(data) {
+            const progressBar = document.getElementById('progress_bar');
+            const progressStatus = document.getElementById('progress_status');
+            const progressPercent = document.getElementById('progress_percent');
+            const sizesInfo = document.getElementById('progress_sizes_info');
+
+            let percent = 0;
+            if (data.total_segments > 0) {
+                percent = Math.round((data.current / data.total_segments) * 100);
+            }
+
+            progressBar.style.width = percent + '%';
+            progressPercent.textContent = percent + '%';
+
+            const statusMap = {
+                'starting': '启动中...',
+                'parsing': '解析m3u8...',
+                'downloading': `下载切片中... (${data.current}/${data.total_segments})`,
+                'completed': '处理完成',
+                'stopped': '已终止',
+                'error': '处理出错',
+                'cancelled': '已取消'
+            };
+            progressStatus.textContent = statusMap[data.status] || data.status;
+
+            // 实时展示大小和耗流
+            if (data.total_original_size !== undefined && (data.total_original_size > 0 || data.total_traffic > 0)) {
+                sizesInfo.textContent = `TS总大小: ${formatBytes(data.total_original_size)} | 消耗流量: ${formatBytes(data.total_traffic)}`;
+            } else {
+                sizesInfo.textContent = '';
+            }
+        }
+
+        function updatePreview(frameIndex) {
+            if (!taskData || !taskData.frames || taskData.frames.length === 0) return;
+
+            const frame = taskData.frames[frameIndex];
+            if (!frame) return;
+
+            currentFrameIndex = frameIndex;
+
+            const previewImg = document.getElementById('preview_img');
+            const previewTime = document.getElementById('preview_time');
+            const previewFrameInfo = document.getElementById('preview_frame_info');
+
+            previewImg.src = `/api/frame/${currentTaskId}/${frame.image}`;
+            previewTime.textContent = formatTimeFull(frame.time);
+            previewFrameInfo.textContent = `帧 ${frameIndex + 1} / ${taskData.frames.length}`;
+
+            // 高亮对应的缩略图，取消了原本的 scrollIntoView
+            document.querySelectorAll('.frame-item').forEach((item, idx) => {
+                if (idx === frameIndex) {
+                    item.classList.add('active');
+                } else {
+                    item.classList.remove('active');
+                }
+            });
+        }
+
+        function showViewer(data) {
+            document.getElementById('progress_section').classList.remove('active');
+            document.getElementById('viewer_section').classList.add('active');
+
+            const videoName = document.getElementById('video_name').value.trim() || '未命名视频';
+            document.getElementById('viewer_title').textContent = videoName;
+            
+            // 最终数据显示在视频详情头里
+            document.getElementById('video_info').textContent =
+                `共 ${data.total_segments} 个切片 | 时长 ${formatTime(data.total_duration)} | 提取 ${data.frames.length} 帧 | TS原总大小 ${formatBytes(data.total_original_size)} | 总耗流 ${formatBytes(data.total_traffic)}`;
+            
+            document.getElementById('timeline_duration').textContent = formatTimeFull(data.total_duration);
+
+            // 默认显示第一帧
+            if (data.frames.length > 0) {
+                updatePreview(0);
+            }
+
+            // 构建缩略图网格（底部）
+            const framesGrid = document.getElementById('frames_grid');
+            framesGrid.innerHTML = '';
+
+            data.frames.forEach((frame, idx) => {
+                const item = document.createElement('div');
+                item.className = 'frame-item' + (idx === 0 ? ' active' : '');
+                item.innerHTML = `
+                    <img src="/api/frame/${currentTaskId}/${frame.image}" alt="帧 ${idx + 1}" loading="lazy">
+                    <div class="frame-time">${formatTimeFull(frame.time)}</div>
+                `;
+                item.addEventListener('click', () => {
+                    updatePreview(idx);
+                });
+                framesGrid.appendChild(item);
+            });
+
+            // 构建时间轴
+            buildTimeline(data);
+        }
+
+        function buildTimeline(data) {
+            const segments = data.frames;
+            const totalDuration = data.total_duration;
+            const timelineSegments = document.getElementById('timeline_segments');
+            timelineSegments.innerHTML = '';
+
+            segments.forEach((seg, idx) => {
+                const div = document.createElement('div');
+                div.className = 'timeline-segment loaded';
+                // 根据当前切片的时间戳在总时长中的比例，绝对定位其起始点
+                div.style.left = (seg.time / totalDuration * 100) + '%';
+                div.style.width = (seg.duration / totalDuration * 100) + '%';
+                div.dataset.index = idx;
+                div.dataset.time = seg.time;
+                div.dataset.duration = seg.duration;
+                div.dataset.image = seg.image;
+                timelineSegments.appendChild(div);
+            });
+
+            // 时间轴交互
+            const wrapper = document.getElementById('timeline_wrapper');
+            const cursor = document.getElementById('timeline_cursor');
+            const progress = document.getElementById('timeline_progress');
+
+            wrapper.addEventListener('mousemove', (e) => {
+                const rect = wrapper.getBoundingClientRect();
+                const x = e.clientX - rect.left;
+                const percent = Math.max(0, Math.min(1, x / rect.width));
+                const currentTime = percent * totalDuration;
+
+                cursor.style.display = 'block';
+                cursor.style.left = (percent * 100) + '%';
+                progress.style.width = (percent * 100) + '%';
+                
+                // 将当前时间格式化并赋值给 data-time 属性，CSS会自动读取并显示
+                cursor.setAttribute('data-time', formatTimeFull(currentTime));
+
+                // 找到最近的帧
+                let closestIdx = 0;
+                let minDiff = Infinity;
+
+                segments.forEach((seg, idx) => {
+                    const segCenter = seg.time + seg.duration / 2;
+                    const diff = Math.abs(segCenter - currentTime);
+                    if (diff < minDiff) {
+                        minDiff = diff;
+                        closestIdx = idx;
+                    }
+                });
+
+                // 更新上方大图
+                updatePreview(closestIdx);
+            });
+
+            wrapper.addEventListener('mouseleave', () => {
+                cursor.style.display = 'none';
+                progress.style.width = '0%';
+            });
+        }
+
+        function resetUI() {
+            const btn = document.getElementById('btn_download');
+            btn.disabled = false;
+            btn.textContent = '开始下载并提取首帧';
+            document.getElementById('progress_section').classList.remove('active');
+            document.getElementById('empty_state').style.display = 'block';
+            currentTaskId = null;
+            currentFrameIndex = 0;
+            if (statusInterval) clearInterval(statusInterval);
+        }
+    </script>
+</body>
+</html>
