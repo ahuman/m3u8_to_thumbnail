@@ -517,6 +517,10 @@
                 <label for="cookie">Cookie（可选，部分视频网站需要）</label>
                 <textarea id="cookie" placeholder="在此粘贴Cookie，例如：uuid=xxx; session=yyy; ..."></textarea>
             </div>
+            <div class="input-group">
+                <label for="ffmpeg_path">FFmpeg 目录或文件路径（可选，若系统已配置环境变量则留空即可）</label>
+                <input type="text" id="ffmpeg_path" placeholder="例如：C:\ffmpeg\bin 或 C:\ffmpeg\bin\ffmpeg.exe">
+            </div>
             <button class="btn-download" id="btn_download" onclick="startDownload()">
                 开始下载并提取首帧
             </button>
@@ -633,6 +637,7 @@
             const m3u8Url = document.getElementById('m3u8_url').value.trim();
             const videoName = document.getElementById('video_name').value.trim();
             const cookie = document.getElementById('cookie').value.trim();
+            const ffmpegPath = document.getElementById('ffmpeg_path').value.trim();
 
             if (!m3u8Url) {
                 showToast('请输入m3u8视频地址', 'error');
@@ -652,7 +657,7 @@
                 const response = await fetch('/api/start', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ m3u8_url: m3u8Url, video_name: videoName, cookie: cookie })
+                    body: JSON.stringify({ m3u8_url: m3u8Url, video_name: videoName, cookie: cookie, ffmpeg_path: ffmpegPath })
                 });
                 const data = await response.json();
 

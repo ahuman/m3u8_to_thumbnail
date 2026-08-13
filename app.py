@@ -103,73 +103,19 @@ def resolve_m3u8(m3u8_url, cookie=''):
     return segments, total_duration
 
 
-def download_ts_head(ts_url, output_path, m3u8_url, cookie='', max_size=1024*1024):
-    """下载ts文件的前max_size字节（3次重试），返回 (是否成功, 原始大小, 消耗流量)"""
-    headers = build_headers(m3u8_url, cookie)
-
-    for retry in range(3):
-        try:
-            # 先尝试Range请求
-            range_headers = headers.copy()
-            range_headers['Range'] = f'bytes=0-{max_size-1}'
-            resp = requests.get(ts_url, headers=range_headers, verify=False, timeout=30, stream=True)
-            resp.raise_for_status()
-
-            # 尝试从 Content-Range 获取原始大小 (如: bytes 0-1048575/2345678)
-            original_size = 0
-            content_range = resp.headers.get('Content-Range')
-            if content_range and '/' in content_range:
-                try:
-                    original_size = int(content_range.split('/')[1])
-                except:
-                    pass
-            
-            if not original_size:
-                original_size = int(resp.headers.get('Content-Length', 0))
-
-            downloaded = 0
-            with open(output_path, 'wb') as f:
-                for chunk in resp.iter_content(chunk_size=8192):
-                    if chunk:
-                        f.write(chunk)
-                        downloaded += len(chunk)
-                        if downloaded >= max_size:
-                            break
-            
-            original_size = max(original_size, downloaded)
-            return True, original_size, downloaded
-        
-        except Exception:
-            # Range失败，尝试普通请求
-            try:
-                resp = requests.get(ts_url, headers=headers, verify=False, timeout=30, stream=True)
-                resp.raise_for_status()
-                
-                original_size = int(resp.headers.get('Content-Length', 0))
-                
-                downloaded = 0
-                with open(output_path, 'wb') as f:
-                    for chunk in resp.iter_content(chunk_size=8192):
-                        if chunk:
-                            f.write(chunk)
-                            downloaded += len(chunk)
-                            if downloaded >= max_size:
-                                break
-                                
-                original_size = max(original_size, downloaded)
-                return True, original_size, downloaded
-            
-            except Exception:
-                if retry == 2:
-                    return False, 0, 0
-    return False, 0, 0
-
-
-def extract_first_frame(ts_path, output_image_path):
+def extract_first_frame(ts_path, output_image_path, ffmpeg_path=''):
     """使用ffmpeg从ts文件中提取首帧图片"""
+    # 智能解析 ffmpeg 路径
+    ffmpeg_cmd = 'ffmpeg'
+    if ffmpeg_path:
+        if os.path.isdir(ffmpeg_path):
+            ffmpeg_cmd = os.path.join(ffmpeg_path, 'ffmpeg.exe' if os.name == 'nt' else 'ffmpeg')
+        else:
+            ffmpeg_cmd = ffmpeg_path
+
     try:
         cmd = [
-            'ffmpeg', '-y',
+            ffmpeg_cmd, '-y',
             '-i', ts_path,
             '-ss', '0',
             '-vframes', '1',
@@ -181,14 +127,80 @@ def extract_first_frame(ts_path, output_image_path):
         if os.path.exists(output_image_path) and os.path.getsize(output_image_path) > 0:
             return True
         return False
-    except Exception:
+    except Exception as e:
         return False
+
+
+def smart_download_and_extract(ts_url, ts_path, img_path, m3u8_url, cookie='', max_size=1536*1024, ffmpeg_path=''):
+    """边下载边提取：每 128KB 尝试一次提取，成功则立即中断连接，极限节省流量"""
+    headers = build_headers(m3u8_url, cookie)
+
+    for retry in range(3):
+        try:
+            range_headers = headers.copy()
+            # 设定一个极限安全水位，防止遇到死流一直下
+            range_headers['Range'] = f'bytes=0-{max_size-1}'
+            
+            # stream=True 是核心，允许我们按块读取并随时切断
+            resp = requests.get(ts_url, headers=range_headers, verify=False, timeout=30, stream=True)
+            resp.raise_for_status()
+
+            original_size = 0
+            cr = resp.headers.get('Content-Range')
+            if cr and '/' in cr:
+                try:
+                    original_size = int(cr.split('/')[1])
+                except:
+                    pass
+            if not original_size:
+                original_size = int(resp.headers.get('Content-Length', 0))
+
+            downloaded = 0
+            buffer_size = 0
+            check_interval = 128 * 1024  # 每 128KB 触发一次 FFmpeg 盲盒测试
+            success = False
+
+            with open(ts_path, 'wb') as f:
+                for chunk in resp.iter_content(chunk_size=8192):
+                    if chunk:
+                        f.write(chunk)
+                        downloaded += len(chunk)
+                        buffer_size += len(chunk)
+
+                        # 数据积攒达到检查点
+                        if buffer_size >= check_interval:
+                            f.flush()  # 确保内存数据已刷入硬盘
+                            if extract_first_frame(ts_path, img_path, ffmpeg_path):
+                                resp.close()  # 提取成功，果断斩断下载连接！
+                                success = True
+                                break
+                            buffer_size = 0  # 没成功，重置积攒器，继续下
+
+                        if downloaded >= max_size:
+                            break
+            
+            # 如果循环结束了还没成功（比如文件总共就不够 128KB），做最后一次保底尝试
+            if not success:
+                if extract_first_frame(ts_path, img_path, ffmpeg_path):
+                    success = True
+
+            original_size = max(original_size, downloaded)
+            
+            if success:
+                return True, original_size, downloaded
+
+        except Exception:
+            if retry == 2:
+                return False, 0, 0
+                
+    return False, 0, 0
 
 
 def process_task(task_id, m3u8_url, video_name, cookie=''):
     """后台处理任务"""
     task = tasks[task_id]
     work_dir = task['work_dir']
+    ffmpeg_path = task.get('ffmpeg_path', '')
 
     try:
         # 1. 解析m3u8（支持多层结构）
@@ -216,33 +228,31 @@ def process_task(task_id, m3u8_url, video_name, cookie=''):
             ts_path = os.path.join(work_dir, f'seg_{idx:04d}.ts')
             img_path = os.path.join(work_dir, f'frame_{idx:04d}.jpg')
 
-            # 下载前1MB，并获取大小与耗流
-            success, orig_size, traffic = download_ts_head(seg['url'], ts_path, m3u8_url, cookie)
+            # 使用流式截断下载策略
+            success, orig_size, traffic = smart_download_and_extract(seg['url'], ts_path, img_path, m3u8_url, cookie, ffmpeg_path=ffmpeg_path)
+            
             if not success:
                 task['failed_segments'].append(idx)
                 task['current'] = idx + 1
+                if os.path.exists(ts_path):
+                    os.remove(ts_path)
                 continue
 
             # 累计大小与流量
             task['total_original_size'] += orig_size
             task['total_traffic'] += traffic
 
-            # 提取首帧
-            frame_success = extract_first_frame(ts_path, img_path)
+            # 记录成功帧
+            task['frames'].append({
+                'index': idx,
+                'time': sum(s['duration'] for s in segments[:idx]),
+                'duration': seg['duration'],
+                'image': f'frame_{idx:04d}.jpg'
+            })
 
             # 删除ts文件节省空间
             if os.path.exists(ts_path):
                 os.remove(ts_path)
-
-            if frame_success:
-                task['frames'].append({
-                    'index': idx,
-                    'time': sum(s['duration'] for s in segments[:idx]),
-                    'duration': seg['duration'],
-                    'image': f'frame_{idx:04d}.jpg'
-                })
-            else:
-                task['failed_segments'].append(idx)
 
             task['current'] = idx + 1
 
@@ -264,6 +274,7 @@ def start_download():
     m3u8_url = data.get('m3u8_url', '').strip()
     video_name = data.get('video_name', '').strip()
     cookie = data.get('cookie', '').strip()
+    ffmpeg_path = data.get('ffmpeg_path', '').strip()
 
     if not m3u8_url:
         return jsonify({'success': False, 'error': '请输入m3u8网址'})
@@ -280,13 +291,14 @@ def start_download():
         'video_name': video_name or '未命名视频',
         'm3u8_url': m3u8_url,
         'cookie': cookie,
+        'ffmpeg_path': ffmpeg_path,
         'work_dir': work_dir,
         'status': 'starting',
         'total_segments': 0,
         'current': 0,
         'total_duration': 0,
-        'total_original_size': 0,  # TS原始总大小
-        'total_traffic': 0,        # 下载消耗总流量
+        'total_original_size': 0,  
+        'total_traffic': 0,        
         'frames': [],
         'failed_segments': [],
         'cancelled': False
