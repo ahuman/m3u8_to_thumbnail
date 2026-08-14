@@ -15,6 +15,30 @@ app = Flask(__name__)
 # 存储下载任务状态
 tasks = {}
 
+# 配置文件路径
+CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'config.json')
+
+def load_config():
+    """读取配置文件"""
+    if os.path.exists(CONFIG_FILE):
+        try:
+            with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {"cookie": "", "ffmpeg_path": ""}
+
+def save_config(cookie, ffmpeg_path):
+    """保存配置到文件"""
+    try:
+        config = load_config()
+        config['cookie'] = cookie
+        config['ffmpeg_path'] = ffmpeg_path
+        with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
+            json.dump(config, f, ensure_ascii=False, indent=4)
+    except Exception as e:
+        print(f"保存配置失败: {e}")
+
 
 def build_headers(m3u8_url, cookie=''):
     """构建请求头，自动从m3u8 URL推断Referer和Origin"""
@@ -295,7 +319,11 @@ def process_task(task_id, m3u8_url, video_name, cookie=''):
 
 @app.route('/')
 def index():
-    return render_template('index.html')
+    # 每次打开主页时加载配置参数并传递给前端渲染
+    config = load_config()
+    return render_template('index.html', 
+                           default_cookie=config.get('cookie', ''), 
+                           default_ffmpeg=config.get('ffmpeg_path', ''))
 
 
 @app.route('/api/start', methods=['POST'])
@@ -306,19 +334,19 @@ def start_download():
     cookie = data.get('cookie', '').strip()
     ffmpeg_path = data.get('ffmpeg_path', '').strip()
 
+    # 启动时自动把当前的 cookie 和 ffmpeg_path 存入 config.json 中
+    save_config(cookie, ffmpeg_path)
+
     if not m3u8_url:
         return jsonify({'success': False, 'error': '请输入m3u8网址'})
 
     task_id = str(uuid.uuid4())
     
-    # 核心修改：处理视频名称，作为文件夹名称（过滤掉Windows/Linux不支持的特殊字符）
     if video_name:
         folder_name = re.sub(r'[\\/*?:"<>|]', '_', video_name)
     else:
-        # 如果没填名称，用 UUID 前8位兜底
         folder_name = f"未命名视频_{task_id[:8]}"
 
-    # 获取 app.py 文件所在的绝对路径目录，拼接到 static/ 下
     base_dir = os.path.dirname(os.path.abspath(__file__))
     work_dir = os.path.join(base_dir, 'static', folder_name)
     os.makedirs(work_dir, exist_ok=True)
@@ -399,14 +427,12 @@ def get_status(task_id):
     if not task:
         return jsonify({'success': False, 'error': '任务不存在'})
 
-    # 动态计算耗时返回前端
     if 'start_time' in task:
         if task['status'] in ['starting', 'parsing', 'downloading']:
             elapsed_time = time.time() - task['start_time']
         else:
             elapsed_time = task.get('end_time', time.time()) - task['start_time']
     else:
-        # 本地加载的任务没有 start_time
         elapsed_time = task.get('elapsed_time', 0)
 
     return jsonify({
@@ -446,4 +472,6 @@ def cancel_task(task_id):
 
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    # 增加 use_reloader=False 防止后台被异常重启打断
+    app.run(host='0.0.0.0', port=5000, debug=True, use_reloader=False)
+

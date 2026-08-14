@@ -538,12 +538,14 @@
                 <input type="text" id="video_name" placeholder="输入视频名称">
             </div>
             <div class="input-group">
-                <label for="cookie">Cookie（可选，部分视频网站需要）</label>
-                <textarea id="cookie" placeholder="在此粘贴Cookie，例如：uuid=xxx; session=yyy; ..."></textarea>
+                <label for="cookie">Cookie（可选，部分视频网站需要，自动保存）</label>
+                <!-- 注入后端传入的默认 cookie 值 -->
+                <textarea id="cookie" placeholder="在此粘贴Cookie，例如：uuid=xxx; session=yyy; ...">{{ default_cookie }}</textarea>
             </div>
             <div class="input-group">
-                <label for="ffmpeg_path">FFmpeg 目录或文件路径（可选，若系统已配置环境变量则留空即可）</label>
-                <input type="text" id="ffmpeg_path" placeholder="例如：C:\ffmpeg\bin 或 C:\ffmpeg\bin\ffmpeg.exe">
+                <label for="ffmpeg_path">FFmpeg 目录或文件路径（自动保存）</label>
+                <!-- 注入后端传入的默认 ffmpeg_path 值 -->
+                <input type="text" id="ffmpeg_path" value="{{ default_ffmpeg }}" placeholder="例如：C:\ffmpeg\bin 或 C:\ffmpeg\bin\ffmpeg.exe">
             </div>
             <button class="btn-download" id="btn_download" onclick="startDownload()">
                 开始下载并提取首帧
@@ -637,7 +639,10 @@
         let currentTaskId = null;
         let statusInterval = null;
         let taskData = null;
+        
         let currentFrameIndex = 0;
+        let renderedFramesCount = 0; 
+        let timelineEventAttached = false; 
 
         function showToast(message, type = 'success') {
             const toast = document.getElementById('toast');
@@ -665,7 +670,6 @@
             return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
         }
 
-        // 格式化字节大小为 KB/MB/GB
         function formatBytes(bytes) {
             if (!bytes || bytes === 0) return '0 B';
             const k = 1024;
@@ -695,6 +699,12 @@
             document.getElementById('progress_section').classList.add('active');
             document.getElementById('progress_sizes_info').textContent = '';
             document.getElementById('progress_time_info').textContent = '';
+            document.getElementById('preview_img').src = '';
+            
+            document.getElementById('frames_grid').innerHTML = '';
+            document.getElementById('timeline_segments').innerHTML = '';
+            renderedFramesCount = 0;
+            currentFrameIndex = 0;
 
             try {
                 const response = await fetch('/api/start', {
@@ -717,7 +727,6 @@
             }
         }
 
-        // ========== 新增：加载本地文件逻辑 ==========
         async function loadLocalFolder() {
             const folderPath = document.getElementById('local_folder').value.trim();
             if (!folderPath) {
@@ -748,8 +757,6 @@
                     document.getElementById('video_name').value = taskData.video_name; 
                     showToast('本地数据挂载成功！');
                     showViewer(taskData);
-                    
-                    resetButtonStates();
                 } else {
                     showToast(data.error || '加载失败', 'error');
                     resetUI();
@@ -791,14 +798,39 @@
                         updateProgress(data);
                         taskData = data;
 
+                        if (data.frames && data.frames.length > renderedFramesCount) {
+                            const isFirstBatch = (renderedFramesCount === 0);
+                            
+                            if (isFirstBatch) {
+                                document.getElementById('viewer_section').classList.add('active');
+                                const videoName = data.video_name || document.getElementById('video_name').value.trim() || '未命名视频';
+                                document.getElementById('viewer_title').textContent = videoName;
+                                document.getElementById('timeline_duration').textContent = formatTimeFull(data.total_duration);
+                                if (data.work_dir) {
+                                    document.getElementById('save_path_info').textContent = `数据保存路径: ${data.work_dir}`;
+                                }
+                                initTimelineEvents();
+                            }
+                            
+                            const newFrames = data.frames.slice(renderedFramesCount);
+                            appendNewFrames(newFrames, data.total_duration, renderedFramesCount);
+                            renderedFramesCount = data.frames.length;
+                            
+                            updateVideoInfoText(data);
+
+                            if (isFirstBatch && data.frames.length > 0) {
+                                updatePreview(0);
+                            }
+                        }
+
                         if (data.status === 'completed' || data.status === 'error' || data.status === 'cancelled' || data.status === 'stopped') {
                             clearInterval(statusInterval);
-                            if (data.status === 'completed') {
-                                showToast('处理完成！');
-                                showViewer(data);
-                            } else if (data.status === 'stopped') {
-                                showToast(`已终止，成功提取 ${data.frames.length} 帧`);
-                                showViewer(data);
+                            
+                            if (data.status === 'completed' || data.status === 'stopped') {
+                                showToast(data.status === 'completed' ? '处理完成！' : `已终止，成功提取 ${data.frames.length} 帧`);
+                                document.getElementById('progress_section').classList.remove('active');
+                                updateVideoInfoText(data);
+                                resetButtonStates();
                             } else if (data.status === 'error') {
                                 showToast('错误: ' + data.error, 'error');
                                 resetUI();
@@ -807,11 +839,59 @@
                                 resetUI();
                             }
                         }
+                    } else {
+                        // ======= 新增的 else 分支：接住后台重启/任务丢失的异常 =======
+                        clearInterval(statusInterval);
+                        showToast(data.error || '获取状态失败，任务可能已丢失', 'error');
+                        resetUI();
+                        // =========================================================
                     }
                 } catch (error) {
                     console.error('Polling error:', error);
                 }
             }, 1000);
+        }
+
+        function appendNewFrames(newFrames, totalDuration, startIndex) {
+            const framesGrid = document.getElementById('frames_grid');
+            const timelineSegments = document.getElementById('timeline_segments');
+
+            const gridFragment = document.createDocumentFragment();
+            const timelineFragment = document.createDocumentFragment();
+
+            newFrames.forEach((frame, idx) => {
+                const absoluteIdx = startIndex + idx;
+                
+                const item = document.createElement('div');
+                item.className = 'frame-item' + (absoluteIdx === currentFrameIndex ? ' active' : '');
+                item.innerHTML = `
+                    <img src="/api/frame/${currentTaskId}/${frame.image}" alt="帧 ${absoluteIdx + 1}" loading="lazy">
+                    <div class="frame-time">${formatTimeFull(frame.time)}</div>
+                `;
+                item.addEventListener('click', () => {
+                    updatePreview(absoluteIdx);
+                });
+                gridFragment.appendChild(item);
+
+                const div = document.createElement('div');
+                div.className = 'timeline-segment loaded';
+                div.style.left = (frame.time / totalDuration * 100) + '%';
+                div.style.width = (frame.duration / totalDuration * 100) + '%';
+                div.dataset.index = absoluteIdx;
+                div.dataset.time = frame.time;
+                div.dataset.duration = frame.duration;
+                div.dataset.image = frame.image;
+                timelineFragment.appendChild(div);
+            });
+
+            framesGrid.appendChild(gridFragment);
+            timelineSegments.appendChild(timelineFragment);
+        }
+
+        function updateVideoInfoText(data) {
+            const elapsedStr = data.elapsed_time ? ` | 已耗时 ${formatTime(data.elapsed_time)}` : '';
+            document.getElementById('video_info').textContent =
+                `共 ${data.total_segments} 个切片 | 时长 ${formatTime(data.total_duration)} | 提取 ${data.frames.length} 帧 | TS原总大小 ${formatBytes(data.total_original_size)} | 总耗流 ${formatBytes(data.total_traffic)}${elapsedStr}`;
         }
 
         function updateProgress(data) {
@@ -840,14 +920,12 @@
             };
             progressStatus.textContent = statusMap[data.status] || data.status;
 
-            // 实时展示大小和耗流
             if (data.total_original_size !== undefined && (data.total_original_size > 0 || data.total_traffic > 0)) {
                 sizesInfo.textContent = `TS总大小: ${formatBytes(data.total_original_size)} | 消耗流量: ${formatBytes(data.total_traffic)}`;
             } else {
                 sizesInfo.textContent = '';
             }
 
-            // 实时展示耗时
             if (data.elapsed_time !== undefined) {
                 timeInfo.textContent = `已耗时: ${formatTime(data.elapsed_time)}`;
             } else {
@@ -862,23 +940,22 @@
             if (!frame) return;
 
             currentFrameIndex = frameIndex;
-
             const previewImg = document.getElementById('preview_img');
-            const previewTime = document.getElementById('preview_time');
-            const previewFrameInfo = document.getElementById('preview_frame_info');
+            
+            if (!previewImg.src.includes(frame.image)) {
+                previewImg.src = `/api/frame/${currentTaskId}/${frame.image}`;
+                document.getElementById('preview_time').textContent = formatTimeFull(frame.time);
+                document.getElementById('preview_frame_info').textContent = `帧 ${frameIndex + 1} / ${taskData.frames.length}`;
+            }
 
-            previewImg.src = `/api/frame/${currentTaskId}/${frame.image}`;
-            previewTime.textContent = formatTimeFull(frame.time);
-            previewFrameInfo.textContent = `帧 ${frameIndex + 1} / ${taskData.frames.length}`;
-
-            // 高亮对应的缩略图，取消了原本的 scrollIntoView
-            document.querySelectorAll('.frame-item').forEach((item, idx) => {
-                if (idx === frameIndex) {
-                    item.classList.add('active');
+            const grid = document.getElementById('frames_grid');
+            for (let i = 0; i < grid.children.length; i++) {
+                if (i === frameIndex) {
+                    grid.children[i].classList.add('active');
                 } else {
-                    item.classList.remove('active');
+                    grid.children[i].classList.remove('active');
                 }
-            });
+            }
         }
 
         function showViewer(data) {
@@ -888,12 +965,8 @@
             const videoName = data.video_name || document.getElementById('video_name').value.trim() || '未命名视频';
             document.getElementById('viewer_title').textContent = videoName;
             
-            // 最终数据显示在视频详情头里，包含总耗时
-            const elapsedStr = data.elapsed_time ? ` | 总耗时 ${formatTime(data.elapsed_time)}` : '';
-            document.getElementById('video_info').textContent =
-                `共 ${data.total_segments} 个切片 | 时长 ${formatTime(data.total_duration)} | 提取 ${data.frames.length} 帧 | TS原总大小 ${formatBytes(data.total_original_size)} | 总耗流 ${formatBytes(data.total_traffic)}${elapsedStr}`;
+            updateVideoInfoText(data);
             
-            // 展示当前数据存储路径，方便用户拷贝后续直接加载
             if (data.work_dir) {
                 document.getElementById('save_path_info').textContent = `数据保存路径: ${data.work_dir}`;
             } else {
@@ -902,58 +975,33 @@
             
             document.getElementById('timeline_duration').textContent = formatTimeFull(data.total_duration);
 
-            // 默认显示第一帧
+            document.getElementById('frames_grid').innerHTML = '';
+            document.getElementById('timeline_segments').innerHTML = '';
+            
+            initTimelineEvents();
+            
+            renderedFramesCount = 0;
+            appendNewFrames(data.frames, data.total_duration, 0);
+            renderedFramesCount = data.frames.length;
+
             if (data.frames.length > 0) {
                 updatePreview(0);
             }
-
-            // 构建缩略图网格（底部）
-            const framesGrid = document.getElementById('frames_grid');
-            framesGrid.innerHTML = '';
-
-            data.frames.forEach((frame, idx) => {
-                const item = document.createElement('div');
-                item.className = 'frame-item' + (idx === 0 ? ' active' : '');
-                item.innerHTML = `
-                    <img src="/api/frame/${currentTaskId}/${frame.image}" alt="帧 ${idx + 1}" loading="lazy">
-                    <div class="frame-time">${formatTimeFull(frame.time)}</div>
-                `;
-                item.addEventListener('click', () => {
-                    updatePreview(idx);
-                });
-                framesGrid.appendChild(item);
-            });
-
-            // 构建时间轴
-            buildTimeline(data);
+            
             resetButtonStates();
         }
 
-        function buildTimeline(data) {
-            const segments = data.frames;
-            const totalDuration = data.total_duration;
-            const timelineSegments = document.getElementById('timeline_segments');
-            timelineSegments.innerHTML = '';
-
-            segments.forEach((seg, idx) => {
-                const div = document.createElement('div');
-                div.className = 'timeline-segment loaded';
-                // 根据当前切片的时间戳在总时长中的比例，绝对定位其起始点
-                div.style.left = (seg.time / totalDuration * 100) + '%';
-                div.style.width = (seg.duration / totalDuration * 100) + '%';
-                div.dataset.index = idx;
-                div.dataset.time = seg.time;
-                div.dataset.duration = seg.duration;
-                div.dataset.image = seg.image;
-                timelineSegments.appendChild(div);
-            });
-
-            // 时间轴交互
+        function initTimelineEvents() {
+            if (timelineEventAttached) return;
             const wrapper = document.getElementById('timeline_wrapper');
             const cursor = document.getElementById('timeline_cursor');
             const progress = document.getElementById('timeline_progress');
 
             wrapper.addEventListener('mousemove', (e) => {
+                if (!taskData || !taskData.frames || taskData.frames.length === 0) return;
+                const totalDuration = taskData.total_duration;
+                const segments = taskData.frames;
+
                 const rect = wrapper.getBoundingClientRect();
                 const x = e.clientX - rect.left;
                 const percent = Math.max(0, Math.min(1, x / rect.width));
@@ -963,10 +1011,8 @@
                 cursor.style.left = (percent * 100) + '%';
                 progress.style.width = (percent * 100) + '%';
                 
-                // 将当前时间格式化并赋值给 data-time 属性，CSS会自动读取并显示
                 cursor.setAttribute('data-time', formatTimeFull(currentTime));
 
-                // 找到最近的帧
                 let closestIdx = 0;
                 let minDiff = Infinity;
 
@@ -979,7 +1025,6 @@
                     }
                 });
 
-                // 更新上方大图
                 updatePreview(closestIdx);
             });
 
@@ -987,8 +1032,10 @@
                 cursor.style.display = 'none';
                 progress.style.width = '0%';
             });
+            
+            timelineEventAttached = true;
         }
-        
+
         function resetButtonStates() {
             const btnDown = document.getElementById('btn_download');
             btnDown.disabled = false;
@@ -1003,8 +1050,10 @@
             resetButtonStates();
             document.getElementById('progress_section').classList.remove('active');
             document.getElementById('empty_state').style.display = 'block';
+            document.getElementById('viewer_section').classList.remove('active');
             currentTaskId = null;
             currentFrameIndex = 0;
+            renderedFramesCount = 0;
             if (statusInterval) clearInterval(statusInterval);
         }
     </script>
