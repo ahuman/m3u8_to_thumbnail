@@ -228,7 +228,21 @@
         .viewer-header h2 {
             color: #ccd6f6;
             font-size: 1.3em;
+            display: inline-block;
         }
+
+        /* 徽章样式 */
+        .badge {
+            font-size: 0.75em;
+            padding: 4px 10px;
+            border-radius: 8px;
+            margin-left: 12px;
+            vertical-align: middle;
+            font-weight: 600;
+            letter-spacing: 0.5px;
+        }
+        .badge.completed { background: rgba(32, 191, 85, 0.15); color: #20bf55; border: 1px solid rgba(32, 191, 85, 0.4); }
+        .badge.interrupted { background: rgba(255, 153, 0, 0.15); color: #ff9900; border: 1px solid rgba(255, 153, 0, 0.4); }
 
         .video-info {
             color: #8892b0;
@@ -528,7 +542,6 @@
         </div>
 
         <div class="input-section">
-            <!-- 下载任务区域 -->
             <div class="input-group">
                 <label for="m3u8_url">M3U8 视频地址</label>
                 <input type="text" id="m3u8_url" placeholder="https://example.com/video.m3u8">
@@ -539,12 +552,10 @@
             </div>
             <div class="input-group">
                 <label for="cookie">Cookie（可选，部分视频网站需要，自动保存）</label>
-                <!-- 注入后端传入的默认 cookie 值 -->
                 <textarea id="cookie" placeholder="在此粘贴Cookie，例如：uuid=xxx; session=yyy; ...">{{ default_cookie }}</textarea>
             </div>
             <div class="input-group">
                 <label for="ffmpeg_path">FFmpeg 目录或文件路径（自动保存）</label>
-                <!-- 注入后端传入的默认 ffmpeg_path 值 -->
                 <input type="text" id="ffmpeg_path" value="{{ default_ffmpeg }}" placeholder="例如：C:\ffmpeg\bin 或 C:\ffmpeg\bin\ffmpeg.exe">
             </div>
             <button class="btn-download" id="btn_download" onclick="startDownload()">
@@ -553,9 +564,8 @@
             
             <hr class="divider">
             
-            <!-- 本地加载区域 -->
             <div class="input-group">
-                <label for="local_folder">加载本地已下载的记录（断网可用）</label>
+                <label for="local_folder">加载本地已下载的记录（断点续传支持）</label>
                 <input type="text" id="local_folder" placeholder="输入之前生成的文件夹绝对路径，例如：C:\m3u8_viewer\static\xxx">
             </div>
             <button class="btn-download btn-local" id="btn_load_local" onclick="loadLocalFolder()">
@@ -567,9 +577,7 @@
             <div class="progress-info">
                 <div class="progress-left">
                     <span id="progress_status" class="loading-text">准备中...</span>
-                    <!-- 大小与流量信息占位 -->
                     <span id="progress_sizes_info" style="color: #8892b0; font-size: 0.9em; margin-left: 15px; font-family: 'Courier New', monospace;"></span>
-                    <!-- 新增耗时信息展示占位 -->
                     <span id="progress_time_info" style="color: #20bf55; font-size: 0.9em; margin-left: 15px; font-family: 'Courier New', monospace;"></span>
                     <button class="btn-cancel" id="btn_cancel" onclick="cancelDownload()">终止</button>
                 </div>
@@ -582,10 +590,17 @@
 
         <div class="viewer-section" id="viewer_section">
             <div class="viewer-header">
-                <h2 id="viewer_title">视频预览</h2>
+                <div>
+                    <h2 id="viewer_title">视频预览</h2>
+                    <!-- 动态状态徽章 -->
+                    <span id="video_completion_badge" class="badge" style="display: none;"></span>
+                    <!-- 断点续传按钮 -->
+                    <button id="btn_resume" class="btn-download" style="display:none; width:auto; padding: 4px 14px; font-size:0.8em; margin-left: 10px; text-transform:none; letter-spacing:0;" onclick="resumeDownload()">
+                        从断点处接着下载
+                    </button>
+                </div>
                 <div>
                     <div class="video-info" id="video_info"></div>
-                    <!-- 展示本地工作目录的路径 -->
                     <div class="save-path" id="save_path_info"></div>
                 </div>
             </div>
@@ -614,7 +629,6 @@
             <!-- 缩略图网格（底部） -->
             <div class="frames-section-title">所有首帧缩略图</div>
             <div class="frames-grid" id="frames_grid">
-                <!-- 帧图片将在这里显示 -->
             </div>
         </div>
 
@@ -727,6 +741,55 @@
             }
         }
 
+        // 恢复中断的下载
+        async function resumeDownload() {
+            if (!currentTaskId) return;
+            
+            const m3u8Url = document.getElementById('m3u8_url').value.trim();
+            const cookie = document.getElementById('cookie').value.trim();
+            const ffmpegPath = document.getElementById('ffmpeg_path').value.trim();
+
+            if (!m3u8Url) {
+                showToast('恢复下载需要M3U8链接，请在上方输入框补全！', 'error');
+                return;
+            }
+
+            const btn = document.getElementById('btn_resume');
+            btn.disabled = true;
+            btn.textContent = '启动中...';
+
+            try {
+                const response = await fetch(`/api/resume/${currentTaskId}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ m3u8_url: m3u8Url, cookie: cookie, ffmpeg_path: ffmpegPath })
+                });
+                const data = await response.json();
+
+                if (data.success) {
+                    btn.style.display = 'none';
+                    btn.disabled = false;
+                    btn.textContent = '从断点处接着下载';
+                    
+                    document.getElementById('btn_download').disabled = true;
+                    document.getElementById('btn_load_local').disabled = true;
+                    
+                    // 重置 UI 进入下载状态，保留已有的图片网格
+                    document.getElementById('progress_section').classList.add('active');
+                    startStatusPolling();
+                    showToast('正在继续下载...');
+                } else {
+                    showToast(data.error || '继续下载失败', 'error');
+                    btn.disabled = false;
+                    btn.textContent = '从断点处接着下载';
+                }
+            } catch (error) {
+                showToast('网络错误: ' + error.message, 'error');
+                btn.disabled = false;
+                btn.textContent = '从断点处接着下载';
+            }
+        }
+
         async function loadLocalFolder() {
             const folderPath = document.getElementById('local_folder').value.trim();
             if (!folderPath) {
@@ -754,7 +817,12 @@
                     currentTaskId = data.task_id;
                     taskData = data.task_data;
                     
-                    document.getElementById('video_name').value = taskData.video_name; 
+                    // 把存下的元数据反填到界面上，方便用户断点续传
+                    document.getElementById('video_name').value = taskData.video_name || ''; 
+                    if (taskData.m3u8_url) document.getElementById('m3u8_url').value = taskData.m3u8_url;
+                    if (taskData.cookie) document.getElementById('cookie').value = taskData.cookie;
+                    if (taskData.ffmpeg_path) document.getElementById('ffmpeg_path').value = taskData.ffmpeg_path;
+                    
                     showToast('本地数据挂载成功！');
                     showViewer(taskData);
                 } else {
@@ -817,6 +885,7 @@
                             renderedFramesCount = data.frames.length;
                             
                             updateVideoInfoText(data);
+                            updateCompletionBadge(data);
 
                             if (isFirstBatch && data.frames.length > 0) {
                                 updatePreview(0);
@@ -827,24 +896,25 @@
                             clearInterval(statusInterval);
                             
                             if (data.status === 'completed' || data.status === 'stopped') {
-                                showToast(data.status === 'completed' ? '处理完成！' : `已终止，成功提取 ${data.frames.length} 帧`);
+                                showToast(data.status === 'completed' ? '处理完成！' : `已终止/中断，成功提取 ${data.frames.length} 帧`);
                                 document.getElementById('progress_section').classList.remove('active');
                                 updateVideoInfoText(data);
+                                updateCompletionBadge(data);
                                 resetButtonStates();
                             } else if (data.status === 'error') {
                                 showToast('错误: ' + data.error, 'error');
-                                resetUI();
+                                document.getElementById('progress_section').classList.remove('active');
+                                updateCompletionBadge(data);
+                                resetButtonStates();
                             } else if (data.status === 'cancelled') {
                                 showToast('已取消', 'error');
                                 resetUI();
                             }
                         }
                     } else {
-                        // ======= 新增的 else 分支：接住后台重启/任务丢失的异常 =======
                         clearInterval(statusInterval);
                         showToast(data.error || '获取状态失败，任务可能已丢失', 'error');
                         resetUI();
-                        // =========================================================
                     }
                 } catch (error) {
                     console.error('Polling error:', error);
@@ -888,8 +958,36 @@
             timelineSegments.appendChild(timelineFragment);
         }
 
+        // 更新完成状态徽章和断点续传按钮
+        function updateCompletionBadge(data) {
+            const badge = document.getElementById('video_completion_badge');
+            const btnResume = document.getElementById('btn_resume');
+            
+            badge.style.display = 'inline-block';
+
+            if (data.total_segments > 0 && data.frames && data.frames.length >= data.total_segments) {
+                badge.textContent = '✅ 全部完成';
+                badge.className = 'badge completed';
+                btnResume.style.display = 'none';
+            } else if (data.total_segments > 0) {
+                // 有进度但未完成
+                badge.textContent = `⚠️ 已中断 (断点位于第 ${data.frames.length} / ${data.total_segments} 帧)`;
+                badge.className = 'badge interrupted';
+                
+                // 如果当前状态确实已经停止了，才显示继续下载按钮（如果还在边下边播就不显示）
+                if (['stopped', 'error', 'cancelled', 'completed'].includes(data.status)) {
+                    btnResume.style.display = 'inline-block';
+                } else {
+                    btnResume.style.display = 'none';
+                }
+            } else {
+                badge.style.display = 'none';
+                btnResume.style.display = 'none';
+            }
+        }
+
         function updateVideoInfoText(data) {
-            const elapsedStr = data.elapsed_time ? ` | 已耗时 ${formatTime(data.elapsed_time)}` : '';
+            const elapsedStr = data.elapsed_time ? ` | 耗时 ${formatTime(data.elapsed_time)}` : '';
             document.getElementById('video_info').textContent =
                 `共 ${data.total_segments} 个切片 | 时长 ${formatTime(data.total_duration)} | 提取 ${data.frames.length} 帧 | TS原总大小 ${formatBytes(data.total_original_size)} | 总耗流 ${formatBytes(data.total_traffic)}${elapsedStr}`;
         }
@@ -914,7 +1012,7 @@
                 'parsing': '解析m3u8...',
                 'downloading': `下载切片中... (${data.current}/${data.total_segments})`,
                 'completed': '处理完成',
-                'stopped': '已保存并终止',
+                'stopped': '已保存并中断',
                 'error': '处理出错',
                 'cancelled': '已取消'
             };
@@ -931,6 +1029,9 @@
             } else {
                 timeInfo.textContent = '';
             }
+            
+            document.getElementById('btn_cancel').disabled = false;
+            document.getElementById('btn_cancel').textContent = '终止';
         }
 
         function updatePreview(frameIndex) {
@@ -966,6 +1067,7 @@
             document.getElementById('viewer_title').textContent = videoName;
             
             updateVideoInfoText(data);
+            updateCompletionBadge(data);
             
             if (data.work_dir) {
                 document.getElementById('save_path_info').textContent = `数据保存路径: ${data.work_dir}`;

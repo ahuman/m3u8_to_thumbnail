@@ -41,7 +41,6 @@ def save_config(cookie, ffmpeg_path):
 
 
 def build_headers(m3u8_url, cookie=''):
-    """构建请求头，自动从m3u8 URL推断Referer和Origin"""
     parsed = urlparse(m3u8_url)
     referer = f"{parsed.scheme}://{parsed.netloc}/"
     origin = f"{parsed.scheme}://{parsed.netloc}"
@@ -59,7 +58,6 @@ def build_headers(m3u8_url, cookie=''):
 
 
 def download_m3u8_text(m3u8_url, cookie=''):
-    """下载m3u8文本内容"""
     headers = build_headers(m3u8_url, cookie)
     try:
         resp = requests.get(m3u8_url, headers=headers, verify=False, timeout=20)
@@ -70,7 +68,6 @@ def download_m3u8_text(m3u8_url, cookie=''):
 
 
 def parse_master_m3u8(m3u8_content, base_url):
-    """解析master m3u8，提取media m3u8地址（多层结构）"""
     media_urls = []
     lines = [line.strip() for line in m3u8_content.splitlines() if line.strip()]
     i = 0
@@ -86,14 +83,13 @@ def parse_master_m3u8(m3u8_content, base_url):
 
 
 def parse_media_m3u8(m3u8_content, base_url):
-    """解析media m3u8，提取ts切片信息"""
     segments = []
     lines = [line.strip() for line in m3u8_content.splitlines() if line.strip()]
     i = 0
     while i < len(lines):
         line = lines[i]
         if line.startswith("#EXT-X-KEY:"):
-            pass  # 检测到加密，暂不处理密钥
+            pass  
         elif line.startswith("#EXTINF:"):
             duration = float(line.split(":")[1].split(",")[0])
             i += 1
@@ -105,7 +101,6 @@ def parse_media_m3u8(m3u8_content, base_url):
 
 
 def resolve_m3u8(m3u8_url, cookie=''):
-    """解析m3u8（支持多层结构），返回ts切片列表和总时长"""
     base_url = m3u8_url.rsplit('/', 1)[0] + '/'
     content = download_m3u8_text(m3u8_url, cookie)
     media_urls = parse_master_m3u8(content, base_url)
@@ -123,7 +118,6 @@ def resolve_m3u8(m3u8_url, cookie=''):
 
 
 def extract_first_frame(ts_path, output_image_path, ffmpeg_path=''):
-    """使用ffmpeg从ts文件中提取首帧图片，并精准校验画面完整性"""
     ffmpeg_cmd = 'ffmpeg'
     if ffmpeg_path:
         if os.path.isdir(ffmpeg_path):
@@ -143,23 +137,17 @@ def extract_first_frame(ts_path, output_image_path, ffmpeg_path=''):
         ]
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
         
-        # 1. 检查是否成功生成了文件
         if os.path.exists(output_image_path) and os.path.getsize(output_image_path) > 0:
             stderr = result.stderr.lower()
-            
-            # 2. 核心修复：只拦截“画面宏块损坏”或“掩盖错误”，忽略因强行截断产生的常规 EOF 报错
             if "concealing" in stderr or "error while decoding mb" in stderr:
-                return False  # 画面确实有拉伸/拖影，返回 False 继续下载更多数据
-            
-            return True # 画面完整，出图成功
-            
+                return False  
+            return True 
         return False
     except Exception:
         return False
 
 
 def smart_download_and_extract(ts_url, ts_path, img_path, m3u8_url, cookie='', max_size=1536*1024, ffmpeg_path=''):
-    """边下载边提取：每 128KB 尝试一次提取，依靠 FFmpeg 的报错日志做严格拦截"""
     headers = build_headers(m3u8_url, cookie)
 
     for retry in range(3):
@@ -220,37 +208,37 @@ def smart_download_and_extract(ts_url, ts_path, img_path, m3u8_url, cookie='', m
 
 
 def process_task(task_id, m3u8_url, video_name, cookie=''):
-    """后台处理任务"""
+    """后台处理任务，支持断点续传逻辑"""
     task = tasks[task_id]
     work_dir = task['work_dir']
     ffmpeg_path = task.get('ffmpeg_path', '')
 
     def save_metadata():
-        """持久化保存已下载的帧数据及耗时信息到 JSON 文件中"""
         if task.get('frames'):
             meta_path = os.path.join(work_dir, 'metadata.json')
             try:
-                # 动态计算耗时
-                if 'start_time' in task:
-                    if task['status'] in ['starting', 'parsing', 'downloading']:
-                        current_elapsed = time.time() - task['start_time']
-                    else:
-                        current_elapsed = task.get('end_time', time.time()) - task['start_time']
-                else:
-                    current_elapsed = task.get('elapsed_time', 0)
+                elapsed = task.get('elapsed_time', 0)
+                if task.get('start_time'):
+                    elapsed += time.time() - task['start_time']
 
                 with open(meta_path, 'w', encoding='utf-8') as f:
                     json.dump({
                         'video_name': task.get('video_name', '未命名视频'),
+                        'm3u8_url': task.get('m3u8_url', ''),      # 持久化链接供续传
+                        'cookie': task.get('cookie', ''),
+                        'ffmpeg_path': task.get('ffmpeg_path', ''),
                         'total_duration': task.get('total_duration', 0),
                         'total_segments': task.get('total_segments', 0),
                         'total_original_size': task.get('total_original_size', 0),
                         'total_traffic': task.get('total_traffic', 0),
-                        'elapsed_time': current_elapsed,
+                        'elapsed_time': elapsed,
                         'frames': task.get('frames', [])
                     }, f, ensure_ascii=False, indent=2)
             except Exception as e:
                 print(f"写入元数据失败: {e}")
+
+    task['start_time'] = time.time()
+    task['cancelled'] = False
 
     try:
         task['status'] = 'parsing'
@@ -259,22 +247,24 @@ def process_task(task_id, m3u8_url, video_name, cookie=''):
         if not segments:
             task['status'] = 'error'
             task['error'] = '未找到ts切片'
-            task['end_time'] = time.time()
             return
 
         task['total_segments'] = len(segments)
         task['total_duration'] = total_duration
         task['status'] = 'downloading'
 
+        # 获取已经成功提取的帧的索引集合，跳过它们实现断点续传
+        existing_frames = {f['index'] for f in task.get('frames', [])}
+
         for idx, seg in enumerate(segments):
             if task.get('cancelled'):
-                if task['frames']:
-                    task['status'] = 'stopped'
-                else:
-                    task['status'] = 'cancelled'
-                task['end_time'] = time.time()
-                save_metadata()
-                return
+                task['status'] = 'stopped'
+                break
+
+            # 断点续传核心逻辑：如果已经有了，直接跳过
+            if idx in existing_frames:
+                task['current'] = idx + 1
+                continue
 
             ts_path = os.path.join(work_dir, f'seg_{idx:04d}.ts')
             img_path = os.path.join(work_dir, f'frame_{idx:04d}.jpg')
@@ -282,11 +272,16 @@ def process_task(task_id, m3u8_url, video_name, cookie=''):
             success, orig_size, traffic = smart_download_and_extract(seg['url'], ts_path, img_path, m3u8_url, cookie, ffmpeg_path=ffmpeg_path)
             
             if not success:
-                task['failed_segments'].append(idx)
+                if idx not in task['failed_segments']:
+                    task['failed_segments'].append(idx)
                 task['current'] = idx + 1
                 if os.path.exists(ts_path):
                     os.remove(ts_path)
                 continue
+
+            # 如果原本在失败列表里，成功后要移除
+            if idx in task['failed_segments']:
+                task['failed_segments'].remove(idx)
 
             task['total_original_size'] += orig_size
             task['total_traffic'] += traffic
@@ -297,6 +292,9 @@ def process_task(task_id, m3u8_url, video_name, cookie=''):
                 'duration': seg['duration'],
                 'image': f'frame_{idx:04d}.jpg'
             })
+            
+            # 按索引排序，确保在 UI 上的顺序不会乱
+            task['frames'] = sorted(task['frames'], key=lambda k: k['index'])
 
             if os.path.exists(ts_path):
                 os.remove(ts_path)
@@ -306,20 +304,24 @@ def process_task(task_id, m3u8_url, video_name, cookie=''):
             if (idx + 1) % 10 == 0:
                 save_metadata()
 
-        task['status'] = 'completed'
-        task['end_time'] = time.time()
-        save_metadata()
+        else:
+            # 如果是正常跑完了循环且没有被终止
+            if not task.get('cancelled'):
+                task['status'] = 'completed'
 
     except Exception as e:
         task['status'] = 'error'
         task['error'] = str(e)
-        task['end_time'] = time.time()
+    finally:
+        # 无论成功或中断，都正确累加时间并保存
+        if task.get('start_time'):
+            task['elapsed_time'] = task.get('elapsed_time', 0) + (time.time() - task['start_time'])
+            task['start_time'] = None
         save_metadata()
 
 
 @app.route('/')
 def index():
-    # 每次打开主页时加载配置参数并传递给前端渲染
     config = load_config()
     return render_template('index.html', 
                            default_cookie=config.get('cookie', ''), 
@@ -334,7 +336,6 @@ def start_download():
     cookie = data.get('cookie', '').strip()
     ffmpeg_path = data.get('ffmpeg_path', '').strip()
 
-    # 启动时自动把当前的 cookie 和 ffmpeg_path 存入 config.json 中
     save_config(cookie, ffmpeg_path)
 
     if not m3u8_url:
@@ -359,7 +360,8 @@ def start_download():
         'ffmpeg_path': ffmpeg_path,
         'work_dir': work_dir,
         'status': 'starting',
-        'start_time': time.time(),
+        'start_time': None,
+        'elapsed_time': 0,
         'total_segments': 0,
         'current': 0,
         'total_duration': 0,
@@ -377,9 +379,38 @@ def start_download():
     return jsonify({'success': True, 'task_id': task_id})
 
 
+@app.route('/api/resume/<task_id>', methods=['POST'])
+def resume_task(task_id):
+    """断点续传接口"""
+    task = tasks.get(task_id)
+    if not task:
+        return jsonify({'success': False, 'error': '任务不存在'})
+    
+    if task['status'] in ['starting', 'parsing', 'downloading']:
+        return jsonify({'success': False, 'error': '任务正在运行中，无需恢复'})
+
+    data = request.json or {}
+    if data.get('m3u8_url'):
+        task['m3u8_url'] = data['m3u8_url'].strip()
+    if data.get('cookie') is not None:
+        task['cookie'] = data['cookie'].strip()
+    if data.get('ffmpeg_path') is not None:
+        task['ffmpeg_path'] = data['ffmpeg_path'].strip()
+
+    if not task['m3u8_url']:
+         return jsonify({'success': False, 'error': '未找到M3U8链接，请在输入框补全'})
+
+    task['status'] = 'starting'
+    
+    thread = threading.Thread(target=process_task, args=(task_id, task['m3u8_url'], task['video_name'], task['cookie']))
+    thread.daemon = True
+    thread.start()
+
+    return jsonify({'success': True})
+
+
 @app.route('/api/load_local', methods=['POST'])
 def load_local():
-    """读取本地已完成文件夹中的元数据并挂载"""
     data = request.json
     folder_path = data.get('folder_path', '').strip()
     
@@ -397,21 +428,31 @@ def load_local():
         return jsonify({'success': False, 'error': f'解析 metadata.json 失败: {str(e)}'})
 
     task_id = str(uuid.uuid4())
+    
+    total_segments = metadata.get('total_segments', len(metadata.get('frames', [])))
+    frames = metadata.get('frames', [])
+    
+    # 智能推断加载的状态：如果不满，则标记为中断状态以供续传
+    status = 'completed' if (total_segments > 0 and len(frames) >= total_segments) else 'stopped'
+
     tasks[task_id] = {
         'id': task_id,
         'video_name': metadata.get('video_name', '本地视频'),
-        'm3u8_url': '',
+        'm3u8_url': metadata.get('m3u8_url', ''),
+        'cookie': metadata.get('cookie', ''),
+        'ffmpeg_path': metadata.get('ffmpeg_path', ''),
         'work_dir': folder_path,
-        'status': 'completed',
-        'total_segments': metadata.get('total_segments', len(metadata.get('frames', []))),
-        'current': len(metadata.get('frames', [])),
+        'status': status,
+        'total_segments': total_segments,
+        'current': len(frames),
         'total_duration': metadata.get('total_duration', 0),
         'total_original_size': metadata.get('total_original_size', 0),
         'total_traffic': metadata.get('total_traffic', 0),
         'elapsed_time': metadata.get('elapsed_time', 0),
-        'frames': metadata.get('frames', []),
+        'frames': frames,
         'failed_segments': [],
-        'cancelled': False
+        'cancelled': False,
+        'start_time': None
     }
 
     return jsonify({
@@ -427,13 +468,9 @@ def get_status(task_id):
     if not task:
         return jsonify({'success': False, 'error': '任务不存在'})
 
-    if 'start_time' in task:
-        if task['status'] in ['starting', 'parsing', 'downloading']:
-            elapsed_time = time.time() - task['start_time']
-        else:
-            elapsed_time = task.get('end_time', time.time()) - task['start_time']
-    else:
-        elapsed_time = task.get('elapsed_time', 0)
+    elapsed_time = task.get('elapsed_time', 0)
+    if task.get('start_time'):
+        elapsed_time += time.time() - task['start_time']
 
     return jsonify({
         'success': True,
@@ -472,6 +509,4 @@ def cancel_task(task_id):
 
 
 if __name__ == '__main__':
-    # 增加 use_reloader=False 防止后台被异常重启打断
     app.run(host='0.0.0.0', port=5000, debug=True, use_reloader=False)
-
