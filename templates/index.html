@@ -62,7 +62,7 @@
             font-size: 0.95em;
         }
 
-        .input-group input {
+        .input-group input[type="text"], .input-group input[type="number"] {
             width: 100%;
             padding: 14px 18px;
             border: 2px solid rgba(255, 255, 255, 0.1);
@@ -73,7 +73,7 @@
             transition: all 0.3s ease;
         }
 
-        .input-group input:focus {
+        .input-group input[type="text"]:focus, .input-group input[type="number"]:focus {
             outline: none;
             border-color: #00d4ff;
             box-shadow: 0 0 15px rgba(0, 212, 255, 0.2);
@@ -231,7 +231,6 @@
             display: inline-block;
         }
 
-        /* 徽章样式 */
         .badge {
             font-size: 0.75em;
             padding: 4px 10px;
@@ -413,7 +412,7 @@
             background: rgba(0, 212, 255, 0.1);
         }
 
-        /* ========== 缩略图网格（移到底部） ========== */
+        /* ========== 缩略图网格 ========== */
         .frames-section-title {
             color: #ccd6f6;
             font-size: 1em;
@@ -558,6 +557,33 @@
                 <label for="ffmpeg_path">FFmpeg 目录或文件路径（自动保存）</label>
                 <input type="text" id="ffmpeg_path" value="{{ default_ffmpeg }}" placeholder="例如：C:\ffmpeg\bin 或 C:\ffmpeg\bin\ffmpeg.exe">
             </div>
+
+            <div class="input-group">
+                <label>提取策略</label>
+                <div style="display: flex; gap: 20px; align-items: center; flex-wrap: wrap;">
+                    <label style="display: flex; align-items: center; cursor: pointer; color: #e0e0e0; font-weight: normal; margin: 0;">
+                        <input type="radio" name="strategy" value="traffic" {% if default_strategy != 'time' %}checked{% endif %} onchange="toggleStrategyUI()" style="width: auto; margin-right: 8px;">
+                        流量优先（边下边试，最省流量）
+                    </label>
+                    <label style="display: flex; align-items: center; cursor: pointer; color: #e0e0e0; font-weight: normal; margin: 0;">
+                        <input type="radio" name="strategy" value="time" {% if default_strategy == 'time' %}checked{% endif %} onchange="toggleStrategyUI()" style="width: auto; margin-right: 8px;">
+                        时间优先（固定大小或无限制，提取最快）
+                    </label>
+                </div>
+                <div id="time_strategy_options" style="display: none; background: rgba(0,0,0,0.2); padding: 15px; border-radius: 8px; margin-top: 15px; border: 1px solid rgba(255,255,255,0.05);">
+                    <div style="display: flex; align-items: center; gap: 15px; flex-wrap: wrap;">
+                        <div style="display: flex; align-items: center; gap: 10px;">
+                            <label for="time_max_size" style="color: #ccd6f6; font-size: 0.9em; margin: 0; white-space: nowrap;">截断大小 (MB):</label>
+                            <input type="number" id="time_max_size" value="{{ default_time_max_size_mb }}" step="0.1" min="0.1" style="width: 100px; padding: 10px; background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.1); color: #e0e0e0; border-radius: 6px;">
+                        </div>
+                        <label style="display: flex; align-items: center; cursor: pointer; color: #e0e0e0; font-weight: normal; margin: 0; font-size: 0.9em;">
+                            <input type="checkbox" id="unlimited_size" onchange="toggleUnlimited()" {% if default_is_unlimited %}checked{% endif %} style="width: auto; margin-right: 8px;">
+                            无限制（完整下完每个切片）
+                        </label>
+                    </div>
+                </div>
+            </div>
+
             <button class="btn-download" id="btn_download" onclick="startDownload()">
                 开始下载并提取首帧
             </button>
@@ -655,8 +681,35 @@
         let taskData = null;
         
         let currentFrameIndex = 0;
-        let renderedFramesCount = 0; 
+        // 核心机制：利用 Set 追踪已渲染的段索引，解决乱序/增量插入问题
+        let renderedFrameIndexes = new Set(); 
         let timelineEventAttached = false; 
+
+        document.addEventListener('DOMContentLoaded', () => {
+            toggleStrategyUI();
+            toggleUnlimited();
+        });
+
+        function toggleStrategyUI() {
+            const strategy = document.querySelector('input[name="strategy"]:checked').value;
+            const timeOptions = document.getElementById('time_strategy_options');
+            if (strategy === 'time') {
+                timeOptions.style.display = 'block';
+            } else {
+                timeOptions.style.display = 'none';
+            }
+        }
+        
+        function toggleUnlimited() {
+            const isUnlimited = document.getElementById('unlimited_size').checked;
+            const sizeInput = document.getElementById('time_max_size');
+            sizeInput.disabled = isUnlimited;
+            if (isUnlimited) {
+                sizeInput.style.opacity = '0.5';
+            } else {
+                sizeInput.style.opacity = '1';
+            }
+        }
 
         function showToast(message, type = 'success') {
             const toast = document.getElementById('toast');
@@ -692,6 +745,27 @@
             return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
         }
 
+        function getStrategyPayload() {
+            const strategy = document.querySelector('input[name="strategy"]:checked').value;
+            const isUnlimited = document.getElementById('unlimited_size').checked;
+            const mbValue = parseFloat(document.getElementById('time_max_size').value) || 1.0;
+            
+            let timeMaxSize = 1024 * 1024;
+            if (strategy === 'time') {
+                if (isUnlimited) {
+                    timeMaxSize = -1;
+                } else {
+                    timeMaxSize = Math.floor(mbValue * 1024 * 1024);
+                }
+            }
+            return {
+                strategy: strategy,
+                time_max_size: timeMaxSize,
+                time_max_size_mb: mbValue,
+                is_unlimited: isUnlimited
+            };
+        }
+
         async function startDownload() {
             const m3u8Url = document.getElementById('m3u8_url').value.trim();
             const videoName = document.getElementById('video_name').value.trim();
@@ -702,6 +776,14 @@
                 showToast('请输入m3u8视频地址', 'error');
                 return;
             }
+
+            const payload = {
+                m3u8_url: m3u8Url, 
+                video_name: videoName, 
+                cookie: cookie, 
+                ffmpeg_path: ffmpegPath,
+                ...getStrategyPayload()
+            };
 
             const btn = document.getElementById('btn_download');
             btn.disabled = true;
@@ -717,14 +799,14 @@
             
             document.getElementById('frames_grid').innerHTML = '';
             document.getElementById('timeline_segments').innerHTML = '';
-            renderedFramesCount = 0;
+            renderedFrameIndexes = new Set();
             currentFrameIndex = 0;
 
             try {
                 const response = await fetch('/api/start', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ m3u8_url: m3u8Url, video_name: videoName, cookie: cookie, ffmpeg_path: ffmpegPath })
+                    body: JSON.stringify(payload)
                 });
                 const data = await response.json();
 
@@ -741,7 +823,6 @@
             }
         }
 
-        // 恢复中断的下载
         async function resumeDownload() {
             if (!currentTaskId) return;
             
@@ -754,6 +835,13 @@
                 return;
             }
 
+            const payload = {
+                m3u8_url: m3u8Url, 
+                cookie: cookie, 
+                ffmpeg_path: ffmpegPath,
+                ...getStrategyPayload()
+            };
+
             const btn = document.getElementById('btn_resume');
             btn.disabled = true;
             btn.textContent = '启动中...';
@@ -762,7 +850,7 @@
                 const response = await fetch(`/api/resume/${currentTaskId}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ m3u8_url: m3u8Url, cookie: cookie, ffmpeg_path: ffmpegPath })
+                    body: JSON.stringify(payload)
                 });
                 const data = await response.json();
 
@@ -774,10 +862,9 @@
                     document.getElementById('btn_download').disabled = true;
                     document.getElementById('btn_load_local').disabled = true;
                     
-                    // 重置 UI 进入下载状态，保留已有的图片网格
                     document.getElementById('progress_section').classList.add('active');
                     startStatusPolling();
-                    showToast('正在继续下载...');
+                    showToast('正在继续扫描下载...');
                 } else {
                     showToast(data.error || '继续下载失败', 'error');
                     btn.disabled = false;
@@ -817,12 +904,24 @@
                     currentTaskId = data.task_id;
                     taskData = data.task_data;
                     
-                    // 把存下的元数据反填到界面上，方便用户断点续传
                     document.getElementById('video_name').value = taskData.video_name || ''; 
                     if (taskData.m3u8_url) document.getElementById('m3u8_url').value = taskData.m3u8_url;
                     if (taskData.cookie) document.getElementById('cookie').value = taskData.cookie;
                     if (taskData.ffmpeg_path) document.getElementById('ffmpeg_path').value = taskData.ffmpeg_path;
                     
+                    if (taskData.strategy) {
+                        const r = document.querySelector(`input[name="strategy"][value="${taskData.strategy}"]`);
+                        if (r) r.checked = true;
+                    }
+                    if (taskData.time_max_size_mb !== undefined) {
+                        document.getElementById('time_max_size').value = taskData.time_max_size_mb;
+                    }
+                    if (taskData.is_unlimited !== undefined) {
+                        document.getElementById('unlimited_size').checked = taskData.is_unlimited;
+                    }
+                    toggleStrategyUI();
+                    toggleUnlimited();
+
                     showToast('本地数据挂载成功！');
                     showViewer(taskData);
                 } else {
@@ -866,29 +965,36 @@
                         updateProgress(data);
                         taskData = data;
 
-                        if (data.frames && data.frames.length > renderedFramesCount) {
-                            const isFirstBatch = (renderedFramesCount === 0);
+                        // 根据真实 index 过滤出确实还没渲染过的帧 (兼容从头补足乱序)
+                        if (data.frames) {
+                            const newFrames = data.frames.filter(f => !renderedFrameIndexes.has(f.index));
                             
-                            if (isFirstBatch) {
-                                document.getElementById('viewer_section').classList.add('active');
-                                const videoName = data.video_name || document.getElementById('video_name').value.trim() || '未命名视频';
-                                document.getElementById('viewer_title').textContent = videoName;
-                                document.getElementById('timeline_duration').textContent = formatTimeFull(data.total_duration);
-                                if (data.work_dir) {
-                                    document.getElementById('save_path_info').textContent = `数据保存路径: ${data.work_dir}`;
+                            if (newFrames.length > 0) {
+                                const isFirstBatch = (renderedFrameIndexes.size === 0);
+                                
+                                if (isFirstBatch) {
+                                    document.getElementById('viewer_section').classList.add('active');
+                                    const videoName = data.video_name || document.getElementById('video_name').value.trim() || '未命名视频';
+                                    document.getElementById('viewer_title').textContent = videoName;
+                                    document.getElementById('timeline_duration').textContent = formatTimeFull(data.total_duration);
+                                    if (data.work_dir) {
+                                        document.getElementById('save_path_info').textContent = `数据保存路径: ${data.work_dir}`;
+                                    }
+                                    initTimelineEvents();
                                 }
-                                initTimelineEvents();
-                            }
-                            
-                            const newFrames = data.frames.slice(renderedFramesCount);
-                            appendNewFrames(newFrames, data.total_duration, renderedFramesCount);
-                            renderedFramesCount = data.frames.length;
-                            
-                            updateVideoInfoText(data);
-                            updateCompletionBadge(data);
+                                
+                                insertNewFrames(newFrames, data.total_duration);
+                                newFrames.forEach(f => renderedFrameIndexes.add(f.index));
+                                
+                                updateVideoInfoText(data);
+                                updateCompletionBadge(data);
 
-                            if (isFirstBatch && data.frames.length > 0) {
-                                updatePreview(0);
+                                if (isFirstBatch && data.frames.length > 0) {
+                                    updatePreview(data.frames[0].index);
+                                }
+                            } else {
+                                // 就算没有新图出炉，后台也可能在飞速扫荡进度，需实时更新断点徽章
+                                updateCompletionBadge(data);
                             }
                         }
 
@@ -896,7 +1002,7 @@
                             clearInterval(statusInterval);
                             
                             if (data.status === 'completed' || data.status === 'stopped') {
-                                showToast(data.status === 'completed' ? '处理完成！' : `已终止/中断，成功提取 ${data.frames.length} 帧`);
+                                showToast(data.status === 'completed' ? '处理完成！' : `已保存并中断/终止，成功提取 ${data.frames.length} 帧`);
                                 document.getElementById('progress_section').classList.remove('active');
                                 updateVideoInfoText(data);
                                 updateCompletionBadge(data);
@@ -922,43 +1028,50 @@
             }, 1000);
         }
 
-        function appendNewFrames(newFrames, totalDuration, startIndex) {
+        // 核心支持函数：对DOM进行基于数据集索引的有序插入
+        function insertSorted(container, newElement, index) {
+            const children = Array.from(container.children);
+            const nextNode = children.find(child => parseInt(child.dataset.index) > index);
+            if (nextNode) {
+                container.insertBefore(newElement, nextNode);
+            } else {
+                container.appendChild(newElement);
+            }
+        }
+
+        function insertNewFrames(newFrames, totalDuration) {
             const framesGrid = document.getElementById('frames_grid');
             const timelineSegments = document.getElementById('timeline_segments');
 
-            const gridFragment = document.createDocumentFragment();
-            const timelineFragment = document.createDocumentFragment();
-
-            newFrames.forEach((frame, idx) => {
-                const absoluteIdx = startIndex + idx;
-                
+            newFrames.forEach(frame => {
                 const item = document.createElement('div');
-                item.className = 'frame-item' + (absoluteIdx === currentFrameIndex ? ' active' : '');
+                item.className = 'frame-item' + (frame.index === currentFrameIndex ? ' active' : '');
+                item.dataset.index = frame.index;
                 item.innerHTML = `
-                    <img src="/api/frame/${currentTaskId}/${frame.image}" alt="帧 ${absoluteIdx + 1}" loading="lazy">
+                    <img src="/api/frame/${currentTaskId}/${frame.image}" alt="帧 ${frame.index + 1}" loading="lazy">
                     <div class="frame-time">${formatTimeFull(frame.time)}</div>
                 `;
                 item.addEventListener('click', () => {
-                    updatePreview(absoluteIdx);
+                    updatePreview(frame.index);
                 });
-                gridFragment.appendChild(item);
+                
+                // 自动插入到网格的正确时间顺位
+                insertSorted(framesGrid, item, frame.index);
 
                 const div = document.createElement('div');
                 div.className = 'timeline-segment loaded';
                 div.style.left = (frame.time / totalDuration * 100) + '%';
                 div.style.width = (frame.duration / totalDuration * 100) + '%';
-                div.dataset.index = absoluteIdx;
+                div.dataset.index = frame.index;
                 div.dataset.time = frame.time;
                 div.dataset.duration = frame.duration;
                 div.dataset.image = frame.image;
-                timelineFragment.appendChild(div);
+                
+                // 自动插入到进度条的对应空缺顺位
+                insertSorted(timelineSegments, div, frame.index);
             });
-
-            framesGrid.appendChild(gridFragment);
-            timelineSegments.appendChild(timelineFragment);
         }
 
-        // 更新完成状态徽章和断点续传按钮
         function updateCompletionBadge(data) {
             const badge = document.getElementById('video_completion_badge');
             const btnResume = document.getElementById('btn_resume');
@@ -970,11 +1083,17 @@
                 badge.className = 'badge completed';
                 btnResume.style.display = 'none';
             } else if (data.total_segments > 0) {
-                // 有进度但未完成
-                badge.textContent = `⚠️ 已中断 (断点位于第 ${data.frames.length} / ${data.total_segments} 帧)`;
+                // 将 0-indexed 的失败片段转换为更友好的 1-indexed 让用户看懂
+                let failedText = '';
+                if (data.failed_segments && data.failed_segments.length > 0) {
+                    const displayFailed = data.failed_segments.slice(0, 10).map(i => i + 1).join(', ');
+                    const moreStr = data.failed_segments.length > 10 ? '...' : '';
+                    failedText = ` | 失败帧: ${displayFailed}${moreStr}`;
+                }
+
+                badge.textContent = `⚠️ 已中断 (已扫至第 ${data.current} / ${data.total_segments} 帧${failedText})`;
                 badge.className = 'badge interrupted';
                 
-                // 如果当前状态确实已经停止了，才显示继续下载按钮（如果还在边下边播就不显示）
                 if (['stopped', 'error', 'cancelled', 'completed'].includes(data.status)) {
                     btnResume.style.display = 'inline-block';
                 } else {
@@ -1001,6 +1120,7 @@
 
             let percent = 0;
             if (data.total_segments > 0) {
+                // 以 current 为刻度，代表目前的物理扫描进度，对续传也友好
                 percent = Math.round((data.current / data.total_segments) * 100);
             }
 
@@ -1010,7 +1130,7 @@
             const statusMap = {
                 'starting': '启动中...',
                 'parsing': '解析m3u8...',
-                'downloading': `下载切片中... (${data.current}/${data.total_segments})`,
+                'downloading': `下载扫描切片中... (${data.current}/${data.total_segments})`,
                 'completed': '处理完成',
                 'stopped': '已保存并中断',
                 'error': '处理出错',
@@ -1034,29 +1154,30 @@
             document.getElementById('btn_cancel').textContent = '终止';
         }
 
-        function updatePreview(frameIndex) {
-            if (!taskData || !taskData.frames || taskData.frames.length === 0) return;
+        function updatePreview(segmentIndex) {
+            if (!taskData || !taskData.frames) return;
 
-            const frame = taskData.frames[frameIndex];
+            // 基于明确的帧索引去找对应的数据包
+            const frame = taskData.frames.find(f => f.index === segmentIndex);
             if (!frame) return;
 
-            currentFrameIndex = frameIndex;
+            currentFrameIndex = segmentIndex;
             const previewImg = document.getElementById('preview_img');
             
             if (!previewImg.src.includes(frame.image)) {
                 previewImg.src = `/api/frame/${currentTaskId}/${frame.image}`;
                 document.getElementById('preview_time').textContent = formatTimeFull(frame.time);
-                document.getElementById('preview_frame_info').textContent = `帧 ${frameIndex + 1} / ${taskData.frames.length}`;
+                document.getElementById('preview_frame_info').textContent = `帧 ${segmentIndex + 1} / ${taskData.total_segments}`;
             }
 
             const grid = document.getElementById('frames_grid');
-            for (let i = 0; i < grid.children.length; i++) {
-                if (i === frameIndex) {
-                    grid.children[i].classList.add('active');
+            Array.from(grid.children).forEach(child => {
+                if (parseInt(child.dataset.index) === segmentIndex) {
+                    child.classList.add('active');
                 } else {
-                    grid.children[i].classList.remove('active');
+                    child.classList.remove('active');
                 }
-            }
+            });
         }
 
         function showViewer(data) {
@@ -1082,12 +1203,11 @@
             
             initTimelineEvents();
             
-            renderedFramesCount = 0;
-            appendNewFrames(data.frames, data.total_duration, 0);
-            renderedFramesCount = data.frames.length;
-
-            if (data.frames.length > 0) {
-                updatePreview(0);
+            renderedFrameIndexes.clear();
+            if (data.frames && data.frames.length > 0) {
+                insertNewFrames(data.frames, data.total_duration);
+                data.frames.forEach(f => renderedFrameIndexes.add(f.index));
+                updatePreview(data.frames[0].index);
             }
             
             resetButtonStates();
@@ -1115,19 +1235,20 @@
                 
                 cursor.setAttribute('data-time', formatTimeFull(currentTime));
 
-                let closestIdx = 0;
+                // 全新寻找逻辑：通过对比真实的所属时间段中心锚点与游标的时间差，抓出距离最相近的那块物理存在帧
+                let closestSegmentIndex = 0;
                 let minDiff = Infinity;
 
-                segments.forEach((seg, idx) => {
+                segments.forEach(seg => {
                     const segCenter = seg.time + seg.duration / 2;
                     const diff = Math.abs(segCenter - currentTime);
                     if (diff < minDiff) {
                         minDiff = diff;
-                        closestIdx = idx;
+                        closestSegmentIndex = seg.index;
                     }
                 });
 
-                updatePreview(closestIdx);
+                updatePreview(closestSegmentIndex);
             });
 
             wrapper.addEventListener('mouseleave', () => {
@@ -1155,7 +1276,7 @@
             document.getElementById('viewer_section').classList.remove('active');
             currentTaskId = null;
             currentFrameIndex = 0;
-            renderedFramesCount = 0;
+            renderedFrameIndexes.clear();
             if (statusInterval) clearInterval(statusInterval);
         }
     </script>
