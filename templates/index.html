@@ -267,6 +267,7 @@
             position: relative;
             border: 2px solid rgba(255, 255, 255, 0.1);
             margin-bottom: 20px;
+            cursor: pointer;
         }
 
         .video-preview img {
@@ -351,6 +352,7 @@
             background: linear-gradient(90deg, rgba(0, 212, 255, 0.2), rgba(0, 153, 204, 0.25));
             width: 0%;
             pointer-events: none;
+            transition: width 0.1s ease;
         }
 
         .timeline-cursor {
@@ -428,6 +430,8 @@
             max-height: 300px;
             overflow-y: auto;
             padding-right: 8px;
+            position: relative;
+            scroll-behavior: smooth; 
         }
 
         .frames-grid::-webkit-scrollbar {
@@ -549,6 +553,16 @@
                 <label for="video_name">视频名称（可选）</label>
                 <input type="text" id="video_name" placeholder="输入视频名称">
             </div>
+
+            <!-- 网络代理选项 -->
+            <div class="input-group" style="background: rgba(0,0,0,0.2); padding: 15px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.05);">
+                <label style="display: flex; align-items: center; cursor: pointer; color: #e0e0e0; font-weight: normal; margin-bottom: 8px;">
+                    <input type="checkbox" id="use_proxy" onchange="toggleProxyUI()" {% if default_use_proxy %}checked{% endif %} style="width: auto; margin-right: 8px;">
+                    启用代理选项 (绕过全局代理请关闭此项)
+                </label>
+                <input type="text" id="proxy_address" value="{{ default_proxy_address }}" placeholder="例如：127.0.0.1:1080">
+            </div>
+
             <div class="input-group">
                 <label for="cookie">Cookie（可选，部分视频网站需要，自动保存）</label>
                 <textarea id="cookie" placeholder="在此粘贴Cookie，例如：uuid=xxx; session=yyy; ...">{{ default_cookie }}</textarea>
@@ -681,14 +695,71 @@
         let taskData = null;
         
         let currentFrameIndex = 0;
-        // 核心机制：利用 Set 追踪已渲染的段索引，解决乱序/增量插入问题
         let renderedFrameIndexes = new Set(); 
         let timelineEventAttached = false; 
 
         document.addEventListener('DOMContentLoaded', () => {
             toggleStrategyUI();
             toggleUnlimited();
+            toggleProxyUI();
+
+            document.getElementById('video_preview').addEventListener('click', scrollToCurrentThumbnail);
+            document.getElementById('timeline_wrapper').addEventListener('click', scrollToCurrentThumbnail);
+
+            document.addEventListener('keydown', (e) => {
+                const viewer = document.getElementById('viewer_section');
+                if (!viewer.classList.contains('active')) return;
+                
+                if (['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName)) return;
+
+                if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', ' '].includes(e.key)) {
+                    e.preventDefault(); 
+                }
+
+                if (!taskData || !taskData.frames || taskData.frames.length === 0) return;
+                if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+                    
+                    let currentIndexInArray = taskData.frames.findIndex(f => f.index === currentFrameIndex);
+                    if (currentIndexInArray === -1) currentIndexInArray = 0;
+                    
+                    if (e.key === 'ArrowLeft' && currentIndexInArray > 0) {
+                        currentIndexInArray--;
+                    } else if (e.key === 'ArrowRight' && currentIndexInArray < taskData.frames.length - 1) {
+                        currentIndexInArray++;
+                    }
+                    
+                    const targetSegment = taskData.frames[currentIndexInArray];
+                    
+                    updatePreview(targetSegment.index);
+                    scrollToCurrentThumbnail();
+                    
+                    const totalDuration = taskData.total_duration;
+                    const currentTime = targetSegment.time + targetSegment.duration / 2;
+                    const percent = currentTime / totalDuration;
+                    
+                    const progress = document.getElementById('timeline_progress');
+                    progress.style.width = (percent * 100) + '%';
+                }
+            }, { passive: false });
         });
+
+        function toggleProxyUI() {
+            const useProxy = document.getElementById('use_proxy').checked;
+            const proxyAddressInput = document.getElementById('proxy_address');
+            proxyAddressInput.disabled = !useProxy;
+            proxyAddressInput.style.opacity = useProxy ? '1' : '0.5';
+        }
+
+        function scrollToCurrentThumbnail() {
+            if (currentFrameIndex === null || currentFrameIndex === undefined) return;
+            const grid = document.getElementById('frames_grid');
+            const targetItem = Array.from(grid.children).find(child => parseInt(child.dataset.index) === currentFrameIndex);
+            
+            if (targetItem) {
+                const scrollTop = targetItem.offsetTop - (grid.clientHeight / 2) + (targetItem.clientHeight / 2);
+                grid.scrollTop = scrollTop;
+            }
+        }
 
         function toggleStrategyUI() {
             const strategy = document.querySelector('input[name="strategy"]:checked').value;
@@ -749,6 +820,8 @@
             const strategy = document.querySelector('input[name="strategy"]:checked').value;
             const isUnlimited = document.getElementById('unlimited_size').checked;
             const mbValue = parseFloat(document.getElementById('time_max_size').value) || 1.0;
+            const useProxy = document.getElementById('use_proxy').checked;
+            const proxyAddress = document.getElementById('proxy_address').value.trim();
             
             let timeMaxSize = 1024 * 1024;
             if (strategy === 'time') {
@@ -762,7 +835,9 @@
                 strategy: strategy,
                 time_max_size: timeMaxSize,
                 time_max_size_mb: mbValue,
-                is_unlimited: isUnlimited
+                is_unlimited: isUnlimited,
+                use_proxy: useProxy,
+                proxy_address: proxyAddress
             };
         }
 
@@ -799,7 +874,7 @@
             
             document.getElementById('frames_grid').innerHTML = '';
             document.getElementById('timeline_segments').innerHTML = '';
-            renderedFrameIndexes = new Set();
+            renderedFrameIndexes.clear();
             currentFrameIndex = 0;
 
             try {
@@ -864,7 +939,7 @@
                     
                     document.getElementById('progress_section').classList.add('active');
                     startStatusPolling();
-                    showToast('正在继续扫描下载...');
+                    showToast('正在继续扫描与下载...');
                 } else {
                     showToast(data.error || '继续下载失败', 'error');
                     btn.disabled = false;
@@ -909,6 +984,14 @@
                     if (taskData.cookie) document.getElementById('cookie').value = taskData.cookie;
                     if (taskData.ffmpeg_path) document.getElementById('ffmpeg_path').value = taskData.ffmpeg_path;
                     
+                    if (taskData.use_proxy !== undefined) {
+                        document.getElementById('use_proxy').checked = taskData.use_proxy;
+                    }
+                    if (taskData.proxy_address) {
+                        document.getElementById('proxy_address').value = taskData.proxy_address;
+                    }
+                    toggleProxyUI();
+
                     if (taskData.strategy) {
                         const r = document.querySelector(`input[name="strategy"][value="${taskData.strategy}"]`);
                         if (r) r.checked = true;
@@ -965,7 +1048,6 @@
                         updateProgress(data);
                         taskData = data;
 
-                        // 根据真实 index 过滤出确实还没渲染过的帧 (兼容从头补足乱序)
                         if (data.frames) {
                             const newFrames = data.frames.filter(f => !renderedFrameIndexes.has(f.index));
                             
@@ -993,7 +1075,6 @@
                                     updatePreview(data.frames[0].index);
                                 }
                             } else {
-                                // 就算没有新图出炉，后台也可能在飞速扫荡进度，需实时更新断点徽章
                                 updateCompletionBadge(data);
                             }
                         }
@@ -1028,7 +1109,6 @@
             }, 1000);
         }
 
-        // 核心支持函数：对DOM进行基于数据集索引的有序插入
         function insertSorted(container, newElement, index) {
             const children = Array.from(container.children);
             const nextNode = children.find(child => parseInt(child.dataset.index) > index);
@@ -1054,8 +1134,6 @@
                 item.addEventListener('click', () => {
                     updatePreview(frame.index);
                 });
-                
-                // 自动插入到网格的正确时间顺位
                 insertSorted(framesGrid, item, frame.index);
 
                 const div = document.createElement('div');
@@ -1066,8 +1144,6 @@
                 div.dataset.time = frame.time;
                 div.dataset.duration = frame.duration;
                 div.dataset.image = frame.image;
-                
-                // 自动插入到进度条的对应空缺顺位
                 insertSorted(timelineSegments, div, frame.index);
             });
         }
@@ -1083,15 +1159,14 @@
                 badge.className = 'badge completed';
                 btnResume.style.display = 'none';
             } else if (data.total_segments > 0) {
-                // 将 0-indexed 的失败片段转换为更友好的 1-indexed 让用户看懂
                 let failedText = '';
                 if (data.failed_segments && data.failed_segments.length > 0) {
                     const displayFailed = data.failed_segments.slice(0, 10).map(i => i + 1).join(', ');
                     const moreStr = data.failed_segments.length > 10 ? '...' : '';
-                    failedText = ` | 失败帧: ${displayFailed}${moreStr}`;
+                    failedText = ` | 失败缺失: ${displayFailed}${moreStr}`;
                 }
 
-                badge.textContent = `⚠️ 已中断 (已扫至第 ${data.current} / ${data.total_segments} 帧${failedText})`;
+                badge.textContent = `⚠️ 已中断 (进度扫至第 ${data.current} / ${data.total_segments} 帧${failedText})`;
                 badge.className = 'badge interrupted';
                 
                 if (['stopped', 'error', 'cancelled', 'completed'].includes(data.status)) {
@@ -1120,7 +1195,6 @@
 
             let percent = 0;
             if (data.total_segments > 0) {
-                // 以 current 为刻度，代表目前的物理扫描进度，对续传也友好
                 percent = Math.round((data.current / data.total_segments) * 100);
             }
 
@@ -1130,7 +1204,7 @@
             const statusMap = {
                 'starting': '启动中...',
                 'parsing': '解析m3u8...',
-                'downloading': `下载扫描切片中... (${data.current}/${data.total_segments})`,
+                'downloading': `扫描与下载中... (${data.current}/${data.total_segments})`,
                 'completed': '处理完成',
                 'stopped': '已保存并中断',
                 'error': '处理出错',
@@ -1157,7 +1231,6 @@
         function updatePreview(segmentIndex) {
             if (!taskData || !taskData.frames) return;
 
-            // 基于明确的帧索引去找对应的数据包
             const frame = taskData.frames.find(f => f.index === segmentIndex);
             if (!frame) return;
 
@@ -1231,11 +1304,11 @@
 
                 cursor.style.display = 'block';
                 cursor.style.left = (percent * 100) + '%';
+                
                 progress.style.width = (percent * 100) + '%';
                 
                 cursor.setAttribute('data-time', formatTimeFull(currentTime));
 
-                // 全新寻找逻辑：通过对比真实的所属时间段中心锚点与游标的时间差，抓出距离最相近的那块物理存在帧
                 let closestSegmentIndex = 0;
                 let minDiff = Infinity;
 
@@ -1253,7 +1326,16 @@
 
             wrapper.addEventListener('mouseleave', () => {
                 cursor.style.display = 'none';
-                progress.style.width = '0%';
+                
+                if (taskData && taskData.frames && currentFrameIndex !== null) {
+                    const activeFrame = taskData.frames.find(f => f.index === currentFrameIndex);
+                    if (activeFrame) {
+                        const totalDuration = taskData.total_duration;
+                        const currentTime = activeFrame.time + activeFrame.duration / 2;
+                        const percent = currentTime / totalDuration;
+                        progress.style.width = (percent * 100) + '%';
+                    }
+                }
             });
             
             timelineEventAttached = true;

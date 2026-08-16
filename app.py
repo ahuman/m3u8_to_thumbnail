@@ -7,8 +7,12 @@ import shutil
 import requests
 import subprocess
 import threading
+import urllib3
 from urllib.parse import urljoin, urlparse
 from flask import Flask, render_template, request, jsonify, send_file
+
+# 禁用不安全请求警告
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 app = Flask(__name__)
 
@@ -26,9 +30,17 @@ def load_config():
                 return json.load(f)
         except Exception:
             pass
-    return {"cookie": "", "ffmpeg_path": "", "strategy": "traffic", "time_max_size_mb": 1.0, "is_unlimited": False}
+    return {
+        "cookie": "", 
+        "ffmpeg_path": "", 
+        "strategy": "traffic", 
+        "time_max_size_mb": 1.0, 
+        "is_unlimited": False,
+        "use_proxy": False,
+        "proxy_address": "127.0.0.1:1080"
+    }
 
-def save_config(cookie, ffmpeg_path, strategy, time_max_size_mb, is_unlimited):
+def save_config(cookie, ffmpeg_path, strategy, time_max_size_mb, is_unlimited, use_proxy, proxy_address):
     """保存配置到文件"""
     try:
         config = load_config()
@@ -37,6 +49,8 @@ def save_config(cookie, ffmpeg_path, strategy, time_max_size_mb, is_unlimited):
         config['strategy'] = strategy
         config['time_max_size_mb'] = time_max_size_mb
         config['is_unlimited'] = is_unlimited
+        config['use_proxy'] = use_proxy
+        config['proxy_address'] = proxy_address
         with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
             json.dump(config, f, ensure_ascii=False, indent=4)
     except Exception as e:
@@ -59,11 +73,35 @@ def build_headers(m3u8_url, cookie=''):
         headers["Cookie"] = cookie
     return headers
 
-
-def download_m3u8_text(m3u8_url, cookie=''):
+def build_request_kwargs(m3u8_url, cookie, use_proxy, proxy_address):
+    """构建请求核心参数，强制接管代理与直连逻辑"""
     headers = build_headers(m3u8_url, cookie)
+    kwargs = {
+        "headers": headers,
+        "verify": False
+    }
+    
+    if use_proxy and proxy_address:
+        # 如果未加协议头，默认按 http:// 补全，兼容 shadowsocks 的 HTTP 入口
+        proxy_url = proxy_address if "://" in proxy_address else f"http://{proxy_address}"
+        kwargs["proxies"] = {
+            "http": proxy_url,
+            "https": proxy_url
+        }
+    else:
+        # 核心修正：使用 None 显式覆盖并禁用环境变量中的代理
+        kwargs["proxies"] = {
+            "http": None,
+            "https": None
+        }
+
+    return kwargs
+
+def download_m3u8_text(m3u8_url, cookie='', use_proxy=False, proxy_address=''):
+    kwargs = build_request_kwargs(m3u8_url, cookie, use_proxy, proxy_address)
+    kwargs['timeout'] = 20
     try:
-        resp = requests.get(m3u8_url, headers=headers, verify=False, timeout=20)
+        resp = requests.get(m3u8_url, **kwargs)
         resp.raise_for_status()
         return resp.text
     except Exception as e:
@@ -103,15 +141,15 @@ def parse_media_m3u8(m3u8_content, base_url):
     return segments
 
 
-def resolve_m3u8(m3u8_url, cookie=''):
+def resolve_m3u8(m3u8_url, cookie='', use_proxy=False, proxy_address=''):
     base_url = m3u8_url.rsplit('/', 1)[0] + '/'
-    content = download_m3u8_text(m3u8_url, cookie)
+    content = download_m3u8_text(m3u8_url, cookie, use_proxy, proxy_address)
     media_urls = parse_master_m3u8(content, base_url)
 
     if media_urls:
         media_url = media_urls[0]
         media_base = media_url.rsplit('/', 1)[0] + '/'
-        media_content = download_m3u8_text(media_url, cookie)
+        media_content = download_m3u8_text(media_url, cookie, use_proxy, proxy_address)
         segments = parse_media_m3u8(media_content, media_base)
     else:
         segments = parse_media_m3u8(content, base_url)
@@ -143,23 +181,29 @@ def extract_first_frame(ts_path, output_image_path, ffmpeg_path=''):
         if os.path.exists(output_image_path) and os.path.getsize(output_image_path) > 0:
             stderr = result.stderr.lower()
             if "concealing" in stderr or "error while decoding mb" in stderr:
+                os.remove(output_image_path)
                 return False  
             return True 
         return False
     except Exception:
+        if os.path.exists(output_image_path):
+            os.remove(output_image_path)
         return False
 
 
-def smart_download_and_extract(ts_url, ts_path, img_path, m3u8_url, cookie='', max_size=1536*1024, ffmpeg_path=''):
+def smart_download_and_extract(ts_url, ts_path, img_path, m3u8_url, cookie='', max_size=1536*1024, ffmpeg_path='', use_proxy=False, proxy_address=''):
     """流量优先策略：边下载边提取"""
-    headers = build_headers(m3u8_url, cookie)
+    kwargs_base = build_request_kwargs(m3u8_url, cookie, use_proxy, proxy_address)
 
     for retry in range(3):
         try:
-            range_headers = headers.copy()
-            range_headers['Range'] = f'bytes=0-{max_size-1}'
+            kwargs = kwargs_base.copy()
+            kwargs["headers"] = kwargs_base["headers"].copy()
+            kwargs["headers"]['Range'] = f'bytes=0-{max_size-1}'
+            kwargs["timeout"] = 30
+            kwargs["stream"] = True
             
-            resp = requests.get(ts_url, headers=range_headers, verify=False, timeout=30, stream=True)
+            resp = requests.get(ts_url, **kwargs)
             resp.raise_for_status()
 
             original_size = 0
@@ -211,17 +255,20 @@ def smart_download_and_extract(ts_url, ts_path, img_path, m3u8_url, cookie='', m
     return False, 0, 0
 
 
-def fast_download_and_extract(ts_url, ts_path, img_path, m3u8_url, cookie='', max_size=1024*1024, ffmpeg_path=''):
+def fast_download_and_extract(ts_url, ts_path, img_path, m3u8_url, cookie='', max_size=1024*1024, ffmpeg_path='', use_proxy=False, proxy_address=''):
     """时间优先策略：固定大小提取"""
-    headers = build_headers(m3u8_url, cookie)
+    kwargs_base = build_request_kwargs(m3u8_url, cookie, use_proxy, proxy_address)
 
     for retry in range(3):
         try:
-            range_headers = headers.copy()
+            kwargs = kwargs_base.copy()
+            kwargs["headers"] = kwargs_base["headers"].copy()
             if max_size > 0:
-                range_headers['Range'] = f'bytes=0-{max_size-1}'
+                kwargs["headers"]['Range'] = f'bytes=0-{max_size-1}'
+            kwargs["timeout"] = 30
+            kwargs["stream"] = True
 
-            resp = requests.get(ts_url, headers=range_headers, verify=False, timeout=30, stream=True)
+            resp = requests.get(ts_url, **kwargs)
             resp.raise_for_status()
 
             original_size = 0
@@ -258,12 +305,14 @@ def fast_download_and_extract(ts_url, ts_path, img_path, m3u8_url, cookie='', ma
 
 
 def process_task(task_id, m3u8_url, video_name, cookie=''):
-    """后台处理任务，支持断点续传与失败重试逻辑"""
+    """后台处理任务，支持断点续传与彻底消除失败记录逻辑"""
     task = tasks[task_id]
     work_dir = task['work_dir']
     ffmpeg_path = task.get('ffmpeg_path', '')
     strategy = task.get('strategy', 'traffic')
     time_max_size = task.get('time_max_size', 1048576)
+    use_proxy = task.get('use_proxy', False)
+    proxy_address = task.get('proxy_address', '')
 
     def save_metadata():
         if task.get('frames'):
@@ -282,10 +331,12 @@ def process_task(task_id, m3u8_url, video_name, cookie=''):
                         'strategy': task.get('strategy', 'traffic'),
                         'time_max_size_mb': task.get('time_max_size_mb', 1.0),
                         'is_unlimited': task.get('is_unlimited', False),
+                        'use_proxy': task.get('use_proxy', False),
+                        'proxy_address': task.get('proxy_address', ''),
                         'total_duration': task.get('total_duration', 0),
                         'total_segments': task.get('total_segments', 0),
-                        'current': task.get('current', 0),                    # 持久化保存断点
-                        'failed_segments': task.get('failed_segments', []),   # 持久化保存失败列表
+                        'current': task.get('current', 0),                    
+                        'failed_segments': task.get('failed_segments', []),   
                         'total_original_size': task.get('total_original_size', 0),
                         'total_traffic': task.get('total_traffic', 0),
                         'elapsed_time': elapsed,
@@ -299,7 +350,7 @@ def process_task(task_id, m3u8_url, video_name, cookie=''):
 
     try:
         task['status'] = 'parsing'
-        segments, total_duration = resolve_m3u8(m3u8_url, cookie)
+        segments, total_duration = resolve_m3u8(m3u8_url, cookie, use_proxy, proxy_address)
 
         if not segments:
             task['status'] = 'error'
@@ -317,9 +368,8 @@ def process_task(task_id, m3u8_url, video_name, cookie=''):
                 task['status'] = 'stopped'
                 break
 
-            task['current'] = idx + 1  # 实时更新扫描进度
-            
-            # 断点续传核心：如果有成功的记录，直接跳过并保留进度
+            task['current'] = idx + 1
+
             if idx in existing_frames:
                 continue
 
@@ -327,18 +377,19 @@ def process_task(task_id, m3u8_url, video_name, cookie=''):
             img_path = os.path.join(work_dir, f'frame_{idx:04d}.jpg')
 
             if strategy == 'traffic':
-                success, orig_size, traffic = smart_download_and_extract(seg['url'], ts_path, img_path, m3u8_url, cookie, ffmpeg_path=ffmpeg_path)
+                success, orig_size, traffic = smart_download_and_extract(seg['url'], ts_path, img_path, m3u8_url, cookie, max_size=1536*1024, ffmpeg_path=ffmpeg_path, use_proxy=use_proxy, proxy_address=proxy_address)
             else:
-                success, orig_size, traffic = fast_download_and_extract(seg['url'], ts_path, img_path, m3u8_url, cookie, max_size=time_max_size, ffmpeg_path=ffmpeg_path)
+                success, orig_size, traffic = fast_download_and_extract(seg['url'], ts_path, img_path, m3u8_url, cookie, max_size=time_max_size, ffmpeg_path=ffmpeg_path, use_proxy=use_proxy, proxy_address=proxy_address)
             
             if not success:
                 if idx not in task['failed_segments']:
                     task['failed_segments'].append(idx)
                 if os.path.exists(ts_path):
                     os.remove(ts_path)
+                if os.path.exists(img_path):
+                    os.remove(img_path)
                 continue
 
-            # 如果这帧之前失败过，这次成功了，就把他移出失败列表
             if idx in task['failed_segments']:
                 task['failed_segments'].remove(idx)
 
@@ -352,8 +403,8 @@ def process_task(task_id, m3u8_url, video_name, cookie=''):
                 'image': f'frame_{idx:04d}.jpg'
             })
             
-            # 严格排序，保障传给前端的列表永远是有序的
             task['frames'] = sorted(task['frames'], key=lambda k: k['index'])
+            existing_frames.add(idx)
 
             if os.path.exists(ts_path):
                 os.remove(ts_path)
@@ -383,7 +434,9 @@ def index():
                            default_ffmpeg=config.get('ffmpeg_path', ''),
                            default_strategy=config.get('strategy', 'traffic'),
                            default_time_max_size_mb=config.get('time_max_size_mb', 1.0),
-                           default_is_unlimited=config.get('is_unlimited', False))
+                           default_is_unlimited=config.get('is_unlimited', False),
+                           default_use_proxy=config.get('use_proxy', False),
+                           default_proxy_address=config.get('proxy_address', '127.0.0.1:1080'))
 
 
 @app.route('/api/start', methods=['POST'])
@@ -397,8 +450,10 @@ def start_download():
     time_max_size = data.get('time_max_size', 1048576)
     time_max_size_mb = data.get('time_max_size_mb', 1.0)
     is_unlimited = data.get('is_unlimited', False)
+    use_proxy = data.get('use_proxy', False)
+    proxy_address = data.get('proxy_address', '').strip()
 
-    save_config(cookie, ffmpeg_path, strategy, time_max_size_mb, is_unlimited)
+    save_config(cookie, ffmpeg_path, strategy, time_max_size_mb, is_unlimited, use_proxy, proxy_address)
 
     if not m3u8_url:
         return jsonify({'success': False, 'error': '请输入m3u8网址'})
@@ -424,6 +479,8 @@ def start_download():
         'time_max_size': time_max_size,
         'time_max_size_mb': time_max_size_mb,
         'is_unlimited': is_unlimited,
+        'use_proxy': use_proxy,
+        'proxy_address': proxy_address,
         'work_dir': work_dir,
         'status': 'starting',
         'start_time': None,
@@ -470,6 +527,10 @@ def resume_task(task_id):
         task['time_max_size_mb'] = data['time_max_size_mb']
     if data.get('is_unlimited') is not None:
         task['is_unlimited'] = data['is_unlimited']
+    if data.get('use_proxy') is not None:
+        task['use_proxy'] = data['use_proxy']
+    if data.get('proxy_address') is not None:
+        task['proxy_address'] = data['proxy_address'].strip()
 
     if not task['m3u8_url']:
          return jsonify({'success': False, 'error': '未找到M3U8链接，请在输入框补全'})
@@ -515,10 +576,12 @@ def load_local():
         'strategy': metadata.get('strategy', 'traffic'),
         'time_max_size_mb': metadata.get('time_max_size_mb', 1.0),
         'is_unlimited': metadata.get('is_unlimited', False),
+        'use_proxy': metadata.get('use_proxy', False),
+        'proxy_address': metadata.get('proxy_address', '127.0.0.1:1080'),
         'work_dir': folder_path,
         'status': status,
         'total_segments': total_segments,
-        'current': metadata.get('current', len(frames)), # 恢复原进度记录点
+        'current': metadata.get('current', len(frames)),
         'total_duration': metadata.get('total_duration', 0),
         'total_original_size': metadata.get('total_original_size', 0),
         'total_traffic': metadata.get('total_traffic', 0),
