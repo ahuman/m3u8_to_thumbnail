@@ -50,6 +50,51 @@
             backdrop-filter: blur(10px);
         }
 
+        /* ========== 标签页导航 ========== */
+        .tab-nav {
+            display: flex;
+            border-bottom: 2px solid rgba(255, 255, 255, 0.05);
+            margin-bottom: 25px;
+            gap: 5px;
+        }
+
+        .tab-item {
+            padding: 12px 24px;
+            color: #8892b0;
+            cursor: pointer;
+            border-bottom: 2px solid transparent;
+            margin-bottom: -2px;
+            transition: all 0.3s ease;
+            font-weight: 600;
+            font-size: 1.05em;
+            border-radius: 8px 8px 0 0;
+        }
+
+        .tab-item:hover {
+            color: #ccd6f6;
+            background: rgba(255, 255, 255, 0.03);
+        }
+
+        .tab-item.active {
+            color: #00d4ff;
+            border-bottom-color: #00d4ff;
+            background: rgba(0, 212, 255, 0.05);
+        }
+
+        .tab-content {
+            display: none;
+            animation: fadeIn 0.4s ease;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(5px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
         .input-group {
             margin-bottom: 20px;
         }
@@ -135,6 +180,31 @@
             box-shadow: 0 10px 30px rgba(1, 186, 239, 0.3);
         }
 
+        .btn-batch {
+            flex: 1;
+            padding: 14px;
+            font-size: 1em;
+            background: linear-gradient(135deg, #9b59b6 0%, #8e44ad 100%);
+        }
+        .btn-batch:hover:not(:disabled) {
+            box-shadow: 0 10px 30px rgba(142, 68, 173, 0.3);
+        }
+
+        .btn-small-fetch {
+            padding: 4px 12px;
+            font-size: 0.8em;
+            border-radius: 6px;
+            background: rgba(0, 212, 255, 0.15);
+            border: 1px solid #00d4ff;
+            color: #00d4ff;
+            cursor: pointer;
+            margin-left: 10px;
+            transition: all 0.2s ease;
+        }
+        .btn-small-fetch:hover {
+            background: rgba(0, 212, 255, 0.3);
+        }
+
         .divider {
             border: 0;
             height: 1px;
@@ -206,6 +276,45 @@
             width: 0%;
         }
 
+        /* ========== 批量下载侧边栏/列表区 ========== */
+        .batch-list-section {
+            display: none;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 16px;
+            padding: 25px;
+            margin-bottom: 30px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        
+        .batch-item {
+            padding: 12px 18px;
+            margin-bottom: 8px;
+            border-radius: 8px;
+            background: rgba(0,0,0,0.2);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 0.95em;
+            border: 1px solid rgba(255,255,255,0.05);
+            transition: all 0.3s ease;
+        }
+
+        .batch-item.active {
+            border-color: #00d4ff;
+            background: rgba(0, 212, 255, 0.1);
+            box-shadow: 0 0 10px rgba(0, 212, 255, 0.2);
+        }
+
+        .batch-item.completed {
+            border-color: #20bf55;
+            background: rgba(32, 191, 85, 0.05);
+        }
+
+        .batch-status-icon {
+            font-size: 1.2em;
+        }
+
+
         .viewer-section {
             background: rgba(255, 255, 255, 0.05);
             border-radius: 16px;
@@ -247,6 +356,7 @@
             color: #8892b0;
             font-size: 0.9em;
             text-align: right;
+            line-height: 1.5;
         }
         
         .save-path {
@@ -434,16 +544,19 @@
             scroll-behavior: smooth; 
         }
 
-        .frames-grid::-webkit-scrollbar {
+        .frames-grid::-webkit-scrollbar,
+        #batch_list_ul::-webkit-scrollbar {
             width: 6px;
         }
 
-        .frames-grid::-webkit-scrollbar-track {
+        .frames-grid::-webkit-scrollbar-track,
+        #batch_list_ul::-webkit-scrollbar-track {
             background: rgba(0, 0, 0, 0.2);
             border-radius: 3px;
         }
 
-        .frames-grid::-webkit-scrollbar-thumb {
+        .frames-grid::-webkit-scrollbar-thumb,
+        #batch_list_ul::-webkit-scrollbar-thumb {
             background: #00d4ff;
             border-radius: 3px;
         }
@@ -541,76 +654,125 @@
     <div class="container">
         <div class="header">
             <h1>M3U8 视频切片首帧预览工具</h1>
-            <p>输入m3u8链接在线提取，或加载本地已下载的数据包</p>
+            <p>支持 115 云盘文件直通下载与本地历史还原</p>
         </div>
 
-        <div class="input-section">
-            <div class="input-group">
-                <label for="m3u8_url">M3U8 视频地址</label>
-                <input type="text" id="m3u8_url" placeholder="https://example.com/video.m3u8">
-            </div>
-            <div class="input-group">
-                <label for="video_name">视频名称（可选）</label>
-                <input type="text" id="video_name" placeholder="输入视频名称">
-            </div>
-
-            <!-- 网络代理选项 -->
-            <div class="input-group" style="background: rgba(0,0,0,0.2); padding: 15px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.05);">
-                <label style="display: flex; align-items: center; cursor: pointer; color: #e0e0e0; font-weight: normal; margin-bottom: 8px;">
-                    <input type="checkbox" id="use_proxy" onchange="toggleProxyUI()" {% if default_use_proxy %}checked{% endif %} style="width: auto; margin-right: 8px;">
-                    启用代理选项 (绕过全局代理请关闭此项)
-                </label>
-                <input type="text" id="proxy_address" value="{{ default_proxy_address }}" placeholder="例如：127.0.0.1:1080">
+        <div class="input-section" id="input_section">
+            
+            <!-- 标签页导航 -->
+            <div class="tab-nav">
+                <div class="tab-item active" id="nav_single" onclick="switchTab('single')">单个视频下载</div>
+                <div class="tab-item" id="nav_batch" onclick="switchTab('batch')">115 批量下载</div>
+                <div class="tab-item" id="nav_local" onclick="switchTab('local')">本地记录与断点</div>
             </div>
 
-            <div class="input-group">
-                <label for="cookie">Cookie（可选，部分视频网站需要，自动保存）</label>
-                <textarea id="cookie" placeholder="在此粘贴Cookie，例如：uuid=xxx; session=yyy; ...">{{ default_cookie }}</textarea>
-            </div>
-            <div class="input-group">
-                <label for="ffmpeg_path">FFmpeg 目录或文件路径（自动保存）</label>
-                <input type="text" id="ffmpeg_path" value="{{ default_ffmpeg }}" placeholder="例如：C:\ffmpeg\bin 或 C:\ffmpeg\bin\ffmpeg.exe">
-            </div>
-
-            <div class="input-group">
-                <label>提取策略</label>
-                <div style="display: flex; gap: 20px; align-items: center; flex-wrap: wrap;">
-                    <label style="display: flex; align-items: center; cursor: pointer; color: #e0e0e0; font-weight: normal; margin: 0;">
-                        <input type="radio" name="strategy" value="traffic" {% if default_strategy != 'time' %}checked{% endif %} onchange="toggleStrategyUI()" style="width: auto; margin-right: 8px;">
-                        流量优先（边下边试，最省流量）
-                    </label>
-                    <label style="display: flex; align-items: center; cursor: pointer; color: #e0e0e0; font-weight: normal; margin: 0;">
-                        <input type="radio" name="strategy" value="time" {% if default_strategy == 'time' %}checked{% endif %} onchange="toggleStrategyUI()" style="width: auto; margin-right: 8px;">
-                        时间优先（固定大小或无限制，提取最快）
-                    </label>
+            <!-- 标签一：单任务下载 -->
+            <div id="tab_single" class="tab-content active">
+                <div class="input-group">
+                    <label for="m3u8_url">单个 M3U8 视频直连地址</label>
+                    <input type="text" id="m3u8_url" placeholder="https://example.com/video.m3u8">
                 </div>
-                <div id="time_strategy_options" style="display: none; background: rgba(0,0,0,0.2); padding: 15px; border-radius: 8px; margin-top: 15px; border: 1px solid rgba(255,255,255,0.05);">
-                    <div style="display: flex; align-items: center; gap: 15px; flex-wrap: wrap;">
-                        <div style="display: flex; align-items: center; gap: 10px;">
-                            <label for="time_max_size" style="color: #ccd6f6; font-size: 0.9em; margin: 0; white-space: nowrap;">截断大小 (MB):</label>
-                            <input type="number" id="time_max_size" value="{{ default_time_max_size_mb }}" step="0.1" min="0.1" style="width: 100px; padding: 10px; background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.1); color: #e0e0e0; border-radius: 6px;">
-                        </div>
-                        <label style="display: flex; align-items: center; cursor: pointer; color: #e0e0e0; font-weight: normal; margin: 0; font-size: 0.9em;">
-                            <input type="checkbox" id="unlimited_size" onchange="toggleUnlimited()" {% if default_is_unlimited %}checked{% endif %} style="width: auto; margin-right: 8px;">
-                            无限制（完整下完每个切片）
+                <div class="input-group">
+                    <label for="video_name">视频名称（可选）</label>
+                    <input type="text" id="video_name" placeholder="输入视频名称，将用于创建文件夹">
+                </div>
+                <button class="btn-download" id="btn_download" onclick="startDownload()">
+                    开始下载并提取首帧 (单任务)
+                </button>
+            </div>
+
+            <!-- 标签二：115 云盘批量下载 -->
+            <div id="tab_batch" class="tab-content">
+                <div class="input-group">
+                    <label for="batch_115_filenames" style="color: #00d4ff; font-weight: 600;">☁️ 从 115 网盘根目录的 "m3u8" 文件夹中提取</label>
+                    <textarea id="batch_115_filenames" placeholder="输入待下载的视频文件名（每行一个）。为空时可直接点击下方下载全部。"></textarea>
+                </div>
+                <div style="display: flex; gap: 15px;">
+                    <button class="btn-download btn-batch" style="background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);" id="btn_batch_specific" onclick="start115Batch(false)">
+                        下载以上指定视频
+                    </button>
+                    <button class="btn-download btn-batch" id="btn_batch_all" onclick="start115Batch(true)">
+                        ⬇️ 下载 "m3u8" 文件夹内【全部】视频
+                    </button>
+                </div>
+            </div>
+
+            <!-- 标签三：加载本地记录 -->
+            <div id="tab_local" class="tab-content">
+                <div class="input-group">
+                    <label for="local_folder">加载本地已下载的记录（支持断点续传）</label>
+                    <input type="text" id="local_folder" placeholder="输入之前生成的文件夹绝对路径，例如：C:\m3u8_viewer\static\xxx">
+                </div>
+                <button class="btn-download btn-local" id="btn_load_local" onclick="loadLocalFolder()">
+                    直接加载本地数据文件夹
+                </button>
+            </div>
+
+            <!-- 通用配置项 (全局生效，固定在底部) -->
+            <div id="shared_settings">
+                <div style="display: flex; align-items: center; margin: 30px 0 20px 0;">
+                    <hr class="divider" style="flex: 1; margin: 0;">
+                    <span style="color: #5a6a8a; padding: 0 15px; font-size: 0.9em; font-weight: 600; letter-spacing: 1px;">⚙️ 通用配置项 (全局生效)</span>
+                    <hr class="divider" style="flex: 1; margin: 0;">
+                </div>
+                
+                <div class="input-group">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                        <label for="cookie" style="margin-bottom: 0;">Cookie（下载 115 视频必须项，自动保存）</label>
+                        <button type="button" class="btn-small-fetch" onclick="fetch115Cookie()">⚡ 一键获取已登录的 115 Cookie</button>
+                    </div>
+                    <textarea id="cookie" placeholder="在此粘贴Cookie，例如：uuid=xxx; session=yyy; ...">{{ default_cookie }}</textarea>
+                </div>
+
+                <div class="input-group" style="background: rgba(0,0,0,0.2); padding: 15px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.05);">
+                    <label style="display: flex; align-items: center; cursor: pointer; color: #e0e0e0; font-weight: normal; margin-bottom: 8px;">
+                        <input type="checkbox" id="use_proxy" onchange="toggleProxyUI()" {% if default_use_proxy %}checked{% endif %} style="width: auto; margin-right: 8px;">
+                        启用代理选项 (关闭此项可彻底忽略全局代理直连)
+                    </label>
+                    <input type="text" id="proxy_address" value="{{ default_proxy_address }}" placeholder="例如：127.0.0.1:1080">
+                </div>
+
+                <div class="input-group">
+                    <label for="ffmpeg_path">FFmpeg 目录或文件路径（自动保存）</label>
+                    <input type="text" id="ffmpeg_path" value="{{ default_ffmpeg }}" placeholder="例如：C:\ffmpeg\bin 或 C:\ffmpeg\bin\ffmpeg.exe">
+                </div>
+
+                <div class="input-group">
+                    <label>提取策略</label>
+                    <div style="display: flex; gap: 20px; align-items: center; flex-wrap: wrap;">
+                        <label style="display: flex; align-items: center; cursor: pointer; color: #e0e0e0; font-weight: normal; margin: 0;">
+                            <input type="radio" name="strategy" value="traffic" {% if default_strategy != 'time' %}checked{% endif %} onchange="toggleStrategyUI()" style="width: auto; margin-right: 8px;">
+                            流量优先（边下边试，最省流量）
                         </label>
+                        <label style="display: flex; align-items: center; cursor: pointer; color: #e0e0e0; font-weight: normal; margin: 0;">
+                            <input type="radio" name="strategy" value="time" {% if default_strategy == 'time' %}checked{% endif %} onchange="toggleStrategyUI()" style="width: auto; margin-right: 8px;">
+                            时间优先（固定大小或无限制，提取最快）
+                        </label>
+                    </div>
+                    <div id="time_strategy_options" style="display: none; background: rgba(0,0,0,0.2); padding: 15px; border-radius: 8px; margin-top: 15px; border: 1px solid rgba(255,255,255,0.05);">
+                        <div style="display: flex; align-items: center; gap: 15px; flex-wrap: wrap;">
+                            <div style="display: flex; align-items: center; gap: 10px;">
+                                <label for="time_max_size" style="color: #ccd6f6; font-size: 0.9em; margin: 0; white-space: nowrap;">截断大小 (MB):</label>
+                                <input type="number" id="time_max_size" value="{{ default_time_max_size_mb }}" step="0.1" min="0.1" style="width: 100px; padding: 10px; background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.1); color: #e0e0e0; border-radius: 6px;">
+                            </div>
+                            <label style="display: flex; align-items: center; cursor: pointer; color: #e0e0e0; font-weight: normal; margin: 0; font-size: 0.9em;">
+                                <input type="checkbox" id="unlimited_size" onchange="toggleUnlimited()" {% if default_is_unlimited %}checked{% endif %} style="width: auto; margin-right: 8px;">
+                                无限制（完整下完每个切片）
+                            </label>
+                        </div>
                     </div>
                 </div>
             </div>
+        </div>
 
-            <button class="btn-download" id="btn_download" onclick="startDownload()">
-                开始下载并提取首帧
-            </button>
-            
-            <hr class="divider">
-            
-            <div class="input-group">
-                <label for="local_folder">加载本地已下载的记录（断点续传支持）</label>
-                <input type="text" id="local_folder" placeholder="输入之前生成的文件夹绝对路径，例如：C:\m3u8_viewer\static\xxx">
+        <!-- 批量下载特供：任务列表大纲 -->
+        <div id="batch_list_section" class="batch-list-section">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                <h3 style="color: #ccd6f6; font-size: 1.1em; margin: 0;">批量待下载列表</h3>
+                <span id="batch_counter" style="color: #8892b0; font-size: 0.9em;">0 / 0</span>
             </div>
-            <button class="btn-download btn-local" id="btn_load_local" onclick="loadLocalFolder()">
-                直接加载本地数据文件夹
-            </button>
+            <ul id="batch_list_ul" style="list-style: none; padding: 0; margin: 0; max-height: 200px; overflow-y: auto; scroll-behavior: smooth;">
+            </ul>
         </div>
 
         <div class="progress-section" id="progress_section">
@@ -619,7 +781,7 @@
                     <span id="progress_status" class="loading-text">准备中...</span>
                     <span id="progress_sizes_info" style="color: #8892b0; font-size: 0.9em; margin-left: 15px; font-family: 'Courier New', monospace;"></span>
                     <span id="progress_time_info" style="color: #20bf55; font-size: 0.9em; margin-left: 15px; font-family: 'Courier New', monospace;"></span>
-                    <button class="btn-cancel" id="btn_cancel" onclick="cancelDownload()">终止</button>
+                    <button class="btn-cancel" id="btn_cancel" onclick="cancelDownload()">终止当前任务</button>
                 </div>
                 <span id="progress_percent">0%</span>
             </div>
@@ -691,6 +853,8 @@
 
     <script>
         let currentTaskId = null;
+        let currentBatchId = null;
+        
         let statusInterval = null;
         let taskData = null;
         
@@ -718,7 +882,6 @@
 
                 if (!taskData || !taskData.frames || taskData.frames.length === 0) return;
                 if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
-                    
                     let currentIndexInArray = taskData.frames.findIndex(f => f.index === currentFrameIndex);
                     if (currentIndexInArray === -1) currentIndexInArray = 0;
                     
@@ -729,7 +892,6 @@
                     }
                     
                     const targetSegment = taskData.frames[currentIndexInArray];
-                    
                     updatePreview(targetSegment.index);
                     scrollToCurrentThumbnail();
                     
@@ -742,6 +904,141 @@
                 }
             }, { passive: false });
         });
+
+        // 标签页切换逻辑
+        function switchTab(tabId) {
+            // 重置激活状态
+            document.querySelectorAll('.tab-item').forEach(el => el.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+
+            // 激活当前标签
+            document.getElementById(`nav_${tabId}`).classList.add('active');
+            document.getElementById(`tab_${tabId}`).classList.add('active');
+        }
+
+        // 异步提取 115 浏览器 Cookie
+        async function fetch115Cookie() {
+            showToast('正在从 115 浏览器中提取 Cookie...');
+            try {
+                const res = await fetch('/api/get_115_cookie');
+                const data = await res.json();
+                if (data.success) {
+                    document.getElementById('cookie').value = data.cookie;
+                    showToast('已成功提取并填入 115 Cookie！');
+                } else {
+                    showToast(data.error, 'error');
+                }
+            } catch (e) {
+                showToast('提取发生网络异常: ' + e.message, 'error');
+            }
+        }
+
+        // 启动 115 网盘直连批量下载
+        async function start115Batch(isAll) {
+            const filenamesText = document.getElementById('batch_115_filenames').value.trim();
+            const filenames = filenamesText.split('\n').map(n => n.trim()).filter(n => n.length > 0);
+            
+            if (!isAll && filenames.length === 0) {
+                showToast('按指定文件名下载时，必须在上方输入框内填入文件名！', 'error');
+                return;
+            }
+            
+            const mode = isAll ? 'all' : 'specific';
+            const cookie = document.getElementById('cookie').value.trim();
+            const ffmpegPath = document.getElementById('ffmpeg_path').value.trim();
+
+            if (!cookie) {
+                showToast('115云盘直传必须填写 Cookie，请点击上方“一键获取”！', 'error');
+                return;
+            }
+
+            const payload = {
+                mode: mode,
+                filenames: filenames,
+                cookie: cookie,
+                ffmpeg_path: ffmpegPath,
+                ...getStrategyPayload()
+            };
+
+            const btnSpec = document.getElementById('btn_batch_specific');
+            const btnAll = document.getElementById('btn_batch_all');
+            btnSpec.disabled = true;
+            btnAll.disabled = true;
+            btnAll.textContent = '读取网盘与构建队列中...';
+
+            try {
+                const res = await fetch('/api/batch_115_start', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const data = await res.json();
+                if (data.success) {
+                    currentBatchId = data.batch_id;
+                    currentTaskId = null; 
+                    
+                    document.getElementById('empty_state').style.display = 'none';
+                    document.getElementById('input_section').style.display = 'none'; // 批量时隐藏大面积输入框
+                    document.getElementById('viewer_section').classList.remove('active');
+                    document.getElementById('progress_section').classList.add('active');
+                    document.getElementById('batch_list_section').style.display = 'block';
+                    
+                    document.getElementById('frames_grid').innerHTML = '';
+                    document.getElementById('timeline_segments').innerHTML = '';
+                    document.getElementById('preview_img').src = '';
+                    renderedFrameIndexes.clear();
+                    currentFrameIndex = 0;
+                    
+                    startStatusPolling();
+                    showToast(data.message);
+                } else {
+                    showToast(data.error || '批量启动失败', 'error');
+                    resetUI();
+                }
+            } catch (e) {
+                showToast('网络错误: ' + e.message, 'error');
+            } finally {
+                btnSpec.disabled = false;
+                btnAll.disabled = false;
+                btnAll.textContent = '⬇️ 下载 "m3u8" 文件夹内【全部】视频';
+            }
+        }
+
+        // 渲染批处理任务大纲列表
+        function renderBatchList(taskList, activeTaskId) {
+            const ul = document.getElementById('batch_list_ul');
+            ul.innerHTML = '';
+            
+            let completedCount = 0;
+
+            taskList.forEach(t => {
+                const li = document.createElement('li');
+                li.className = 'batch-item' + (t.task_id === activeTaskId ? ' active' : '') + (['completed', 'stopped'].includes(t.status) ? ' completed' : '');
+                
+                let icon = '⏳';
+                if (t.status === 'completed' || t.status === 'stopped') {
+                    icon = '✅';
+                    completedCount++;
+                }
+                else if (t.status === 'error' || t.status === 'cancelled') icon = '❌';
+                else if (t.status === 'downloading' || t.status === 'starting' || t.status === 'parsing') icon = '🔄';
+                
+                li.innerHTML = `
+                    <span style="color: #e0e0e0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 90%;">${t.video_name}</span>
+                    <span class="batch-status-icon">${icon}</span>
+                `;
+                ul.appendChild(li);
+                
+                if (t.task_id === activeTaskId) {
+                    setTimeout(() => {
+                        const scrollPos = li.offsetTop - (ul.clientHeight / 2) + (li.clientHeight / 2);
+                        ul.scrollTop = scrollPos;
+                    }, 0);
+                }
+            });
+            
+            document.getElementById('batch_counter').textContent = `${completedCount} / ${taskList.length}`;
+        }
 
         function toggleProxyUI() {
             const useProxy = document.getElementById('use_proxy').checked;
@@ -866,6 +1163,7 @@
             document.getElementById('btn_load_local').disabled = true;
 
             document.getElementById('empty_state').style.display = 'none';
+            document.getElementById('input_section').style.display = 'none';
             document.getElementById('viewer_section').classList.remove('active');
             document.getElementById('progress_section').classList.add('active');
             document.getElementById('progress_sizes_info').textContent = '';
@@ -887,6 +1185,7 @@
 
                 if (data.success) {
                     currentTaskId = data.task_id;
+                    currentBatchId = null;
                     startStatusPolling();
                 } else {
                     showToast(data.error || '启动失败', 'error');
@@ -977,6 +1276,7 @@
 
                 if (data.success) {
                     currentTaskId = data.task_id;
+                    currentBatchId = null;
                     taskData = data.task_data;
                     
                     document.getElementById('video_name').value = taskData.video_name || ''; 
@@ -1018,19 +1318,49 @@
         }
 
         async function cancelDownload() {
-            if (!currentTaskId) return;
-
-            const btn = document.getElementById('btn_cancel');
-            btn.disabled = true;
-            btn.textContent = '终止中...';
-
-            try {
+            if (currentBatchId) {
+                await fetch(`/api/cancel_batch/${currentBatchId}`, { method: 'POST' });
+                showToast('已下达终止请求，当前视频结束后将停止队列');
+            } else if (currentTaskId) {
                 await fetch(`/api/cancel/${currentTaskId}`, { method: 'POST' });
                 showToast('已发送终止请求');
-            } catch (error) {
-                showToast('终止失败: ' + error.message, 'error');
-                btn.disabled = false;
-                btn.textContent = '终止';
+            }
+        }
+
+        // 统一处理所有视频核心数据展示的逻辑模块
+        function processTaskDataUpdate(data) {
+            updateProgress(data);
+            taskData = data;
+
+            if (data.frames) {
+                const newFrames = data.frames.filter(f => !renderedFrameIndexes.has(f.index));
+                
+                if (newFrames.length > 0) {
+                    const isFirstBatch = (renderedFrameIndexes.size === 0);
+                    
+                    if (isFirstBatch) {
+                        document.getElementById('viewer_section').classList.add('active');
+                        const videoName = data.video_name || document.getElementById('video_name').value.trim() || '未命名视频';
+                        document.getElementById('viewer_title').textContent = videoName;
+                        document.getElementById('timeline_duration').textContent = formatTimeFull(data.total_duration);
+                        if (data.work_dir) {
+                            document.getElementById('save_path_info').textContent = `数据保存路径: ${data.work_dir}`;
+                        }
+                        initTimelineEvents();
+                    }
+                    
+                    insertNewFrames(newFrames, data.total_duration);
+                    newFrames.forEach(f => renderedFrameIndexes.add(f.index));
+                    
+                    updateVideoInfoText(data);
+                    updateCompletionBadge(data);
+
+                    if (isFirstBatch && data.frames.length > 0) {
+                        updatePreview(data.frames[0].index);
+                    }
+                } else {
+                    updateCompletionBadge(data);
+                }
             }
         }
 
@@ -1038,70 +1368,67 @@
             if (statusInterval) clearInterval(statusInterval);
 
             statusInterval = setInterval(async () => {
-                if (!currentTaskId) return;
+                if (!currentTaskId && !currentBatchId) return;
 
                 try {
-                    const response = await fetch(`/api/status/${currentTaskId}`);
-                    const data = await response.json();
-
-                    if (data.success) {
-                        updateProgress(data);
-                        taskData = data;
-
-                        if (data.frames) {
-                            const newFrames = data.frames.filter(f => !renderedFrameIndexes.has(f.index));
+                    // 1. 如果处于批量任务模式
+                    if (currentBatchId) {
+                        const response = await fetch(`/api/batch_status/${currentBatchId}`);
+                        const data = await response.json();
+                        
+                        if (data.success) {
+                            renderBatchList(data.task_list, data.current_task_id);
                             
-                            if (newFrames.length > 0) {
-                                const isFirstBatch = (renderedFrameIndexes.size === 0);
-                                
-                                if (isFirstBatch) {
-                                    document.getElementById('viewer_section').classList.add('active');
-                                    const videoName = data.video_name || document.getElementById('video_name').value.trim() || '未命名视频';
-                                    document.getElementById('viewer_title').textContent = videoName;
-                                    document.getElementById('timeline_duration').textContent = formatTimeFull(data.total_duration);
-                                    if (data.work_dir) {
-                                        document.getElementById('save_path_info').textContent = `数据保存路径: ${data.work_dir}`;
-                                    }
-                                    initTimelineEvents();
+                            const taskPayload = data.current_task_data;
+                            if (taskPayload) {
+                                // 侦测到进入了队列中的下一个视频
+                                if (currentTaskId !== data.current_task_id) {
+                                    currentTaskId = data.current_task_id;
+                                    renderedFrameIndexes.clear();
+                                    currentFrameIndex = 0;
+                                    document.getElementById('frames_grid').innerHTML = '';
+                                    document.getElementById('timeline_segments').innerHTML = '';
+                                    document.getElementById('preview_img').src = '';
+                                    document.getElementById('progress_bar').style.width = '0%';
                                 }
-                                
-                                insertNewFrames(newFrames, data.total_duration);
-                                newFrames.forEach(f => renderedFrameIndexes.add(f.index));
-                                
-                                updateVideoInfoText(data);
-                                updateCompletionBadge(data);
-
-                                if (isFirstBatch && data.frames.length > 0) {
-                                    updatePreview(data.frames[0].index);
-                                }
+                                processTaskDataUpdate(taskPayload);
+                            }
+                            
+                            // 检查批处理是否全部完成
+                            const allDone = data.task_list.every(t => ['completed', 'stopped', 'error', 'cancelled'].includes(t.status));
+                            if (allDone) {
+                                clearInterval(statusInterval);
+                                document.getElementById('progress_section').classList.remove('active');
+                                showToast('批量下载队列已全部完成！');
+                                resetButtonStates();
                             } else {
-                                updateCompletionBadge(data);
+                                document.getElementById('progress_section').classList.add('active');
                             }
-                        }
-
-                        if (data.status === 'completed' || data.status === 'error' || data.status === 'cancelled' || data.status === 'stopped') {
+                        } else {
                             clearInterval(statusInterval);
-                            
-                            if (data.status === 'completed' || data.status === 'stopped') {
-                                showToast(data.status === 'completed' ? '处理完成！' : `已保存并中断/终止，成功提取 ${data.frames.length} 帧`);
-                                document.getElementById('progress_section').classList.remove('active');
-                                updateVideoInfoText(data);
-                                updateCompletionBadge(data);
-                                resetButtonStates();
-                            } else if (data.status === 'error') {
-                                showToast('错误: ' + data.error, 'error');
-                                document.getElementById('progress_section').classList.remove('active');
-                                updateCompletionBadge(data);
-                                resetButtonStates();
-                            } else if (data.status === 'cancelled') {
-                                showToast('已取消', 'error');
-                                resetUI();
-                            }
+                            showToast(data.error || '获取批量状态失败', 'error');
+                            resetUI();
                         }
-                    } else {
-                        clearInterval(statusInterval);
-                        showToast(data.error || '获取状态失败，任务可能已丢失', 'error');
-                        resetUI();
+                    } 
+                    // 2. 否则处理纯单个任务模式
+                    else if (currentTaskId) {
+                        const response = await fetch(`/api/status/${currentTaskId}`);
+                        const data = await response.json();
+
+                        if (data.success) {
+                            processTaskDataUpdate(data);
+
+                            if (['completed', 'error', 'cancelled', 'stopped'].includes(data.status)) {
+                                clearInterval(statusInterval);
+                                document.getElementById('progress_section').classList.remove('active');
+                                showToast(data.status === 'completed' ? '处理完成！' : `已中断/终止，成功提取 ${data.frames.length} 帧`);
+                                resetButtonStates();
+                            }
+                        } else {
+                            clearInterval(statusInterval);
+                            showToast(data.error || '获取单任务状态失败', 'error');
+                            resetUI();
+                        }
                     }
                 } catch (error) {
                     console.error('Polling error:', error);
@@ -1181,9 +1508,35 @@
         }
 
         function updateVideoInfoText(data) {
-            const elapsedStr = data.elapsed_time ? ` | 耗时 ${formatTime(data.elapsed_time)}` : '';
-            document.getElementById('video_info').textContent =
-                `共 ${data.total_segments} 个切片 | 时长 ${formatTime(data.total_duration)} | 提取 ${data.frames.length} 帧 | TS原总大小 ${formatBytes(data.total_original_size)} | 总耗流 ${formatBytes(data.total_traffic)}${elapsedStr}`;
+            const elapsedStr = data.elapsed_time ? `，耗时 ${formatTime(data.elapsed_time)}` : '';
+            const acquisitionStr = data.acquisition_time ? `，获取时间: ${data.acquisition_time}` : '';
+            
+            // 1. 计算存储压缩比 (切片原始大小 / 图片总大小)
+            let storageRatioStr = '1/-';
+            if (data.total_original_size > 0 && data.total_image_size > 0) {
+                const storageDenominator = Math.round(data.total_original_size / data.total_image_size);
+                storageRatioStr = `1/${storageDenominator}`;
+            }
+
+            // 2. 计算流量压缩比 (切片原始大小 / 截断下载总消耗)
+            let trafficRatioStr = '1/-';
+            if (data.total_original_size > 0 && data.total_traffic > 0) {
+                const trafficDenominator = Math.round(data.total_original_size / data.total_traffic);
+                trafficRatioStr = `1/${trafficDenominator}`;
+            }
+
+            const videoInfoDiv = document.getElementById('video_info');
+            
+            // 强制左对齐，并使用 innerHTML 进行多行排版
+            videoInfoDiv.style.textAlign = 'left';
+            videoInfoDiv.innerHTML = 
+                `提取 ${data.frames.length}/${data.total_segments} 切片，切片原始大小：${formatBytes(data.total_original_size)}${acquisitionStr}${elapsedStr}<br>` +
+                `切片截断下载大小：${formatBytes(data.total_traffic)}，流量压缩比：${trafficRatioStr}<br>` +
+                `图片总大小 ${formatBytes(data.total_image_size)}，存储压缩比：${storageRatioStr}`;
+                
+            // 顺便让下方的“保存路径”也跟着左对齐，保持视觉统一
+            const savePathDiv = document.getElementById('save_path_info');
+            if (savePathDiv) savePathDiv.style.textAlign = 'left';
         }
 
         function updateProgress(data) {
@@ -1219,13 +1572,16 @@
             }
 
             if (data.elapsed_time !== undefined) {
-                timeInfo.textContent = `已耗时: ${formatTime(data.elapsed_time)}`;
+                let timeStr = `已耗时: ${formatTime(data.elapsed_time)}`;
+                if (data.status === 'downloading' && data.remaining_time > 0) {
+                    timeStr += ` | 预估剩余: ${formatTime(data.remaining_time)} | 预计完成: ${data.completion_time}`;
+                }
+                timeInfo.textContent = timeStr;
             } else {
                 timeInfo.textContent = '';
             }
             
             document.getElementById('btn_cancel').disabled = false;
-            document.getElementById('btn_cancel').textContent = '终止';
         }
 
         function updatePreview(segmentIndex) {
@@ -1256,6 +1612,7 @@
         function showViewer(data) {
             document.getElementById('progress_section').classList.remove('active');
             document.getElementById('viewer_section').classList.add('active');
+            document.getElementById('input_section').style.display = 'none';
 
             const videoName = data.video_name || document.getElementById('video_name').value.trim() || '未命名视频';
             document.getElementById('viewer_title').textContent = videoName;
@@ -1344,11 +1701,22 @@
         function resetButtonStates() {
             const btnDown = document.getElementById('btn_download');
             btnDown.disabled = false;
-            btnDown.textContent = '开始下载并提取首帧';
+            btnDown.textContent = '开始下载并提取首帧 (单任务)';
             
             const btnLoad = document.getElementById('btn_load_local');
             btnLoad.disabled = false;
             btnLoad.textContent = '直接加载本地数据文件夹';
+
+            const btnSpec = document.getElementById('btn_batch_specific');
+            if (btnSpec) btnSpec.disabled = false;
+            
+            const btnAll = document.getElementById('btn_batch_all');
+            if (btnAll) {
+                btnAll.disabled = false;
+                btnAll.textContent = '⬇️ 下载 "m3u8" 文件夹内【全部】视频';
+            }
+            
+            document.getElementById('input_section').style.display = 'block';
         }
 
         function resetUI() {
@@ -1356,7 +1724,9 @@
             document.getElementById('progress_section').classList.remove('active');
             document.getElementById('empty_state').style.display = 'block';
             document.getElementById('viewer_section').classList.remove('active');
+            document.getElementById('batch_list_section').style.display = 'none';
             currentTaskId = null;
+            currentBatchId = null;
             currentFrameIndex = 0;
             renderedFrameIndexes.clear();
             if (statusInterval) clearInterval(statusInterval);
